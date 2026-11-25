@@ -81,6 +81,7 @@ export function parseDraft(result,article,editorial){
   if(obj?.publish===false)throw new EditorialSkip('model_declined_unverified_story');
   if(typeof obj?.headline!=='string'||typeof obj?.body!=='string')throw new ModelFailure({stage:'response',reason:'invalid_fields'});
   const headline=clean(obj.headline,85),body=clean(obj.body,420);
+  if(article?.gameDetailsRequired&&clean(obj.body,10000).length>420)throw new EditorialSkip('game_details_would_be_truncated');
   if(!headline||!body)throw new EditorialSkip('model_output_incomplete');
   if(article?.gameDetailsRequired&&(body.match(/[^.!?]+[.!?]+(?=\s|$)/g)||[]).filter(x=>x.trim().length>=20).length<3)throw new EditorialSkip('insufficient_game_details');
   const draft={headline,body};
@@ -120,6 +121,8 @@ export async function writePost(article,env,fetchFn=fetch,editorial={}){
       const detail=modelError(e);
       console.warn('Game Scanner model failure:',model,JSON.stringify(detail));
       errors.push({model,...detail});
+      // Both models share this account's daily quota; a fallback cannot restore it.
+      if(detail.reason==='daily_quota')break;
     }
   }
   const allEditorial=errors.length>0&&errors.every(x=>x.stage==='editorial');

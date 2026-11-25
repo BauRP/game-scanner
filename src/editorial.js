@@ -30,12 +30,20 @@ export function assessArticle(article){
   const combined=(title+' '+body).trim();
   if(title.length<9||!article?.url||!article?.source)return {eligible:false,reason:'missing_source'};
   if(has(title,/\b(sponsored|advertorial|opinion|rumor roundup|roundup of deals|best cheap games)\b/i))return {eligible:false,reason:'promotional_or_opinion'};
-  if(has(combined,GIVEAWAY)){
+  // A free-to-play launch is a release, not a temporary giveaway.
+  const newRelease=has(title,/\b(now available|available now|out now|launch(?:es|ed)?|release(?:d| date)?|announc(?:es|ed|ement))\b/i);
+  const freeLaunch=newRelease&&has(combined,/\b(free[- ]to[- ]play|f2p)\b/i)&&!has(combined,/\b(free to keep|giveaway|100% off|claim for free|free for a limited time|free trial|free weekend)\b/i);
+  const trial=has(combined,/\b(free demo|demo available|free trial|free weekend|weekend trial|play for free (?:this|until)|open beta|closed beta|playtest)\b/i);
+  const keep=has(combined,/\b(free to keep|keep forever|claim for free|100% off)\b/i);
+  const rumor=has(combined,RUMOR);
+  // Time-limited access is not ownership, even when a headline says "free game".
+  if(trial&&!keep)return {eligible:true,category:CATEGORIES[rumor?14:12],rumor};
+  if(has(combined,GIVEAWAY)&&!freeLaunch){
     if(has(combined,PERMANENT_FREE))return {eligible:false,category:CATEGORIES[0],reason:'not_a_paid_game_giveaway'};
     if(!has(combined,QUALITY_SIGNAL))return {eligible:false,category:CATEGORIES[0],reason:'giveaway_quality_not_verified'};
-    return {eligible:true,category:CATEGORIES[0],rumor:false};
+    return {eligible:true,category:CATEGORIES[rumor?14:0],rumor};
   }
-  let c=1;
+  let c=freeLaunch?2:1;
   if(has(combined,/\b(ceo|chief executive|resign(?:ed|ation)?|fired|rehir(?:ed|ing)|reinstat(?:ed|ement)|layoffs?|laying off|studio closure|studio shuts|acquisition|acquired|merger|executive|board of directors)\b/i))c=15;
   else if(has(combined,/\b(major outage|servers? down|security breach|critical bug|gamebreaking|shutdown|delisted|vulnerability)\b/i))c=13;
   else if(has(combined,/\b(major update|season update|new season|patch notes|expansion|dlc|update brings)\b/i))c=4;
@@ -46,7 +54,7 @@ export function assessArticle(article){
   else if(has(combined,/\b(esports?|tournament|world championship|grand final)\b/i))c=11;
   else if(has(combined,/\b(movie adaptation|tv adaptation|netflix series|hbo series|live[- ]action adaptation)\b/i))c=10;
   else if(has(combined,/\b(ai npc|generative ai|ai[- ]powered game|artificial intelligence in games)\b/i))c=9;
-  else if(has(combined,/\b(release date|launches on|launch date|out now|launches today|available now|released today)\b/i))c=2;
+  else if(has(combined,/\b(release date|launches on|launch date|out now|launches today|available now|now available|released today)\b/i))c=2;
   else if(has(combined,/\b(announc(?:es|ed|ement)?|unveil(?:s|ed)?|reveal(?:s|ed)?|debut trailer|new trailer|gameplay trailer)\b/i))c=3;
   else if(has(combined,/\b(gta|counter[- ]strike|cs2|dota 2|minecraft|pokemon|fortnite|call of duty|roblox|elden ring|assassin.s creed)\b/i))c=8;
   if(has(combined,RUMOR))c=14;

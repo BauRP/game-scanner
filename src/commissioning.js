@@ -49,12 +49,14 @@ export async function commissionOnce(env,deps={}){
     await initialize(db);
     const {articles}=await (deps.fetchNews||fetchNews)(fetchFn,now,72);
     const candidates=articles.filter(a=>assessArticle(a).eligible);
-    let checked=0;
+    let checked=0,lookups=0,requests=0;
+    const boundedFetch=(...args)=>{if(requests>=10)throw Error('Photo search budget reached');requests++;return fetchFn(...args);};
     let picked;
     for(const article of candidates){
+      if(lookups++>=12||requests>=10)break;
       if(await alreadyAttempted(db,article.url))continue;
       if(checked++>=4)break;
-      const image=await (deps.findArticleImage||findArticleImage)(article,fetchFn);
+      const image=await (deps.findArticleImage||findArticleImage)(article,boundedFetch);
       if(image){picked={article,image};break;}
     }
     if(!picked)return save('no_original_image');
@@ -76,7 +78,7 @@ export async function commissionOnce(env,deps={}){
     if(!first.verified||!second.verified)return save('check_failed',diagnostics);
     const draft=second.draft;
     gemma={...diagnostics,model,backupVerified:true,source:article.source,imageMode:'publisher',imageMethod:image.method,articleUrl:article.url};
-    const day=dayKey(now,5);
+    const day=dayKey(now,0);
     if(!await claim(db,article,day,now))return save('article_already_claimed',gemma);
     claimed=article.url;
     await save('sending',gemma);
