@@ -33,7 +33,7 @@ export async function createAiPreview(env,deps={}){
     if(!picked)throw new Error('No suitable fresh article in current feeds');
     const draft=await (deps.writePost||writePost)(picked.article,env,deps.fetchFn||fetch,picked.editorial);
     const image=env.USE_SOURCE_IMAGES==='true'?await findArticleImage(picked.article,deps.fetchFn||fetch):null;
-    const preview={imageMode:image?'publisher':'game-scanner-cover',imageUrl:image?.url||null,category:picked.editorial.category,source:picked.article.source,originalTitle:picked.article.title,url:picked.article.url,headline:draft.headline,body:draft.body,model:draft.engine,notice:'Это черновик для проверки. В Telegram ничего не отправлялось.'};
+    const preview={imageCandidates:picked.article.imageCandidates||[],imageMethod:image?.method||null,imageMode:image?'publisher':'game-scanner-cover',imageUrl:image?.url||null,category:picked.editorial.category,source:picked.article.source,originalTitle:picked.article.title,url:picked.article.url,headline:draft.headline,body:draft.body,model:draft.engine,notice:'Это черновик для проверки. В Telegram ничего не отправлялось.'};
     await env.DB.prepare("UPDATE ai_previews SET status='ready_to_review',result_json=? WHERE preview_key=?")
       .bind(JSON.stringify(preview),KEY).run();
     return json({status:'ready_to_review',preview});
@@ -51,9 +51,10 @@ export async function refreshPreviewImage(env,deps={}){
     const preview=JSON.parse(row.result_json);
     // No AI invocation, no Telegram call. This only rechecks the preview image.
     const image=env.USE_SOURCE_IMAGES==='true'?await findArticleImage({
-      url:preview.url,source:preview.source,image:null
+      url:preview.url,source:preview.source,image:preview.imageUrl,imageCandidates:preview.imageCandidates||[]
     },deps.fetchFn||fetch):null;
     preview.imageUrl=image?.url||null;
+    preview.imageMethod=image?.method||null;
     preview.imageMode=image?'publisher':'game-scanner-cover';
     await env.DB.prepare('UPDATE ai_previews SET result_json = ? WHERE preview_key = ? AND status = ?')
       .bind(JSON.stringify(preview),KEY,'ready_to_review').run();
