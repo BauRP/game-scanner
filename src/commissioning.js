@@ -76,7 +76,7 @@ export async function commissionOnce(env,deps={}){
     if(!first.verified||!second.verified)return save('check_failed',diagnostics);
     const draft=second.draft;
     gemma={...diagnostics,model,backupVerified:true,source:article.source,imageMode:'publisher',imageMethod:image.method,articleUrl:article.url};
-    const day=dayKey(now,5);
+    const day=dayKey(now,0);
     if(!await claim(db,article,day,now))return save('article_already_claimed',gemma);
     claimed=article.url;
     await save('sending',gemma);
