@@ -1,17 +1,17 @@
 import {requireRussianDraft} from './translator.js';
 import {findArticleImage} from './images.js';
 import {coverPngBytes} from './cover.js';
+import {sourceByName} from './sources.js';
 export function composePost(draft,article){
   const headline=String(draft.headline||'').replace(/[\r\n]/g,' ').trim().slice(0,85);
   const body=String(draft.body||'').replace(/[\r\n]/g,' ').trim().slice(0,420);
-  const source=String(article.source||'').replace(/[\r\n]/g,' ').trim().slice(0,50);
-  const url=String(article.url||'');
-  if(!headline||!body||!source||!/^https:\/\//.test(url)||url.length>450)throw new Error('Telegram caption lacks verifiable source');
-  const ending='\n\nИсточник: '+source+'\n'+url;
-  const intro='🎮 '+headline+'\n\n';
-  const maxBody=Math.min(420,1024-intro.length-ending.length);
-  if(maxBody<35)throw new Error('Article link leaves no room for a caption');
-  return intro+body.slice(0,maxBody)+ending;
+  // Keep the original URL internally; the reader sees only headline and editorial text.
+  const publisher=sourceByName(article?.source);
+  let url;
+  try{url=new URL(article?.url);}catch{throw new Error('Telegram caption lacks verifiable source');}
+  if(!headline||!body||!publisher||url.protocol!=='https:'||url.username||url.password||url.port||!publisher.hosts.includes(url.hostname))throw new Error('Telegram caption lacks verifiable source');
+  if(/https?:\/\/|www\.|(?:^|\s)источник\s*:/i.test(headline+' '+body))throw new Error('Unexpected public source footer');
+  return '🎮 '+headline+'\n\n'+body;
 }
 export class TelegramApiError extends Error{
   constructor(method,status,description){
