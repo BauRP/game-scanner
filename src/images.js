@@ -121,7 +121,7 @@ async function boundedFetch(url,article,fetchFn,isImage,deadline){
   for(let hops=0;hops<=2;hops++){
     url=validate(url);if(!url||Date.now()>=deadline)return null;
     const res=await fetchFn(url,{method:'GET',redirect:'manual',
-      headers:{Accept:isImage?'image/jpeg,image/png,image/webp,image/*;q=0.5':'text/html,application/xhtml+xml','User-Agent':'GameScannerNewsBot/1.0',...(isImage?{Referer:article.url}:{})},
+      headers:{Accept:isImage?'image/jpeg,image/png,image/webp;q=0.9,image/avif;q=0':'text/html,application/xhtml+xml','User-Agent':'GameScannerNewsBot/1.0',...(isImage?{Referer:article.url}:{})},
       signal:AbortSignal.timeout(Math.max(1,Math.min(6500,deadline-Date.now())))});
     if([301,302,303,307,308].includes(res.status)){
       const next=res.headers.get('location');await res.body?.cancel().catch(()=>{});
@@ -195,7 +195,9 @@ export async function findArticleImage(article,fetchFn=fetch){
     }
     return null;
   }
-  const rss=await tryList([...(article.imageCandidates||[]),article.image],'rss',2);
+  // Prefer Telegram-compatible candidates; AVIF URLs are tried last for CDN content negotiation.
+  const feedImages=[...(article.imageCandidates||[]),article.image].filter(Boolean).sort((a,b)=>Number(/\.avif(?:[?#]|$)/i.test(a))-Number(/\.avif(?:[?#]|$)/i.test(b)));
+  const rss=await tryList(feedImages,'rss',2);
   if(rss)return rss;
   try{
     const hit=await boundedFetch(article.url,article,fetchFn,false,deadline);
@@ -207,5 +209,5 @@ export async function findArticleImage(article,fetchFn=fetch){
       }else await hit.res.body?.cancel().catch(()=>{});
     }
   }catch{}
-  return tryList([...(article.imageCandidates||[]),article.image],'rss',MAX_CANDIDATES);
+  return tryList(feedImages,'rss',MAX_CANDIDATES);
 }
