@@ -33,10 +33,15 @@ export function assessArticle(article){
   // A free-to-play launch is a release, not a temporary giveaway.
   const newRelease=has(title,/\b(now available|available now|out now|launch(?:es|ed)?|release(?:d| date)?|announc(?:es|ed|ement))\b/i);
   const freeLaunch=newRelease&&has(combined,/\b(free[- ]to[- ]play|f2p)\b/i)&&!has(combined,/\b(free to keep|giveaway|100% off|claim for free|free for a limited time|free trial|free weekend)\b/i);
+  const trial=has(combined,/\b(free demo|demo available|free trial|free weekend|weekend trial|play for free (?:this|until)|open beta|closed beta|playtest)\b/i);
+  const keep=has(combined,/\b(free to keep|keep forever|claim for free|100% off)\b/i);
+  const rumor=has(combined,RUMOR);
+  // Time-limited access is not ownership, even when a headline says "free game".
+  if(trial&&!keep)return {eligible:true,category:CATEGORIES[rumor?14:12],rumor};
   if(has(combined,GIVEAWAY)&&!freeLaunch){
     if(has(combined,PERMANENT_FREE))return {eligible:false,category:CATEGORIES[0],reason:'not_a_paid_game_giveaway'};
     if(!has(combined,QUALITY_SIGNAL))return {eligible:false,category:CATEGORIES[0],reason:'giveaway_quality_not_verified'};
-    return {eligible:true,category:CATEGORIES[0],rumor:false};
+    return {eligible:true,category:CATEGORIES[rumor?14:0],rumor};
   }
   let c=freeLaunch?2:1;
   if(has(combined,/\b(ceo|chief executive|resign(?:ed|ation)?|fired|rehir(?:ed|ing)|reinstat(?:ed|ement)|layoffs?|laying off|studio closure|studio shuts|acquisition|acquired|merger|executive|board of directors)\b/i))c=15;
