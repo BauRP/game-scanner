@@ -76,8 +76,10 @@ export function verifyDraft(draft,article,editorial={}){
     const n=m[1].replace(',','.');
     if(![...evidence.matchAll(/(\d+(?:[.,]\d+)?)\s*(?:%|percent\b)/gi)].some(x=>x[1].replace(',','.')===n))throw new EditorialSkip('unsupported_percentage');
   }
-  const units=[[/\b(\d+)\s*(?:fps|кадр(?:ов|а)?\s*\/\s*с)/giu,/(\d+)\s*(?:fps|frames per second)\b/gi,'unsupported_fps'],[/(\d+)\s*(?:gb|гб|гигабайт(?:а|ов)?)(?![\p{L}])/giu,/(\d+)\s*(?:gb|gigabytes?)\b/gi,'unsupported_memory']];
-  for(const [out,src,reason] of units){const values=new Set([...evidence.matchAll(src)].map(m=>m[1]));for(const m of produced.matchAll(out))if(!values.has(m[1]))throw new EditorialSkip(reason);}
+  const fps=/(\d+(?:[.,]\d+)?)\s*(?:fps|frames per second|кадр(?:ов|а)?\s*(?:\/\s*с|в секунду))(?![\p{L}])/giu;
+  const memory=/(\d+(?:[.,]\d+)?)\s*(?:gb|gigabytes?|гб|гигабайт(?:а|ов)?)(?![\p{L}])/giu;
+  const units=[[fps,fps,'unsupported_fps'],[memory,memory,'unsupported_memory']];
+  for(const [out,src,reason] of units){const values=new Set([...evidence.matchAll(src)].map(m=>m[1].replace(',','.')));for(const m of produced.matchAll(out))if(!values.has(m[1].replace(',','.')))throw new EditorialSkip(reason);}
   const platforms=[[/\bPS5\b|PlayStation 5/gi,/\bPS5\b|PlayStation 5/i],[/\bPS4\b|PlayStation 4/gi,/\bPS4\b|PlayStation 4/i],[/\bXbox Series\b/gi,/\bXbox Series\b/i],[/\bNintendo Switch\b/gi,/\bNintendo Switch\b/i]];
   for(const [out,src] of platforms)if(produced.match(out)&&!src.test(evidence))throw new EditorialSkip('unsupported_platform');
   for(const num of numbers(produced))if(!inputNums.has(num))throw new EditorialSkip('generated_unsupported_number');
@@ -124,7 +126,7 @@ export async function writeWithModel(article,env,model,editorial={},translationR
   const messages=[
     {role:'system',content:SYSTEM+(translationRetry?' Предыдущий редактор не прошёл проверку русского текста. Напиши новый достоверный перевод на русском, не повторяя английский исходник.':'')+(article.gameDetailsRequired?' Для релиза или анонса: три законченных предложения, первое о событии, следующие два о жанре, механике или особенностях игры. Не повторяй одну мысль. Если фактов мало, откажись от публикации. Используй также предоставленный articleContext.':'')},
     {role:'user',content:JSON.stringify({source:article.source,category:editorial.category||'Главные игровые новости',
-      rumor:Boolean(editorial.rumor),accessType:editorial.accessType||null,title:article.title,excerpt:article.description||'',articleContext:article.articleContext||'',gameDetailsRequired:Boolean(article.gameDetailsRequired)})}
+      rumor:Boolean(editorial.rumor),accessType:editorial.accessType||null,title:article.title,excerpt:article.description||'',articleContext:article.articleContext||article.feedContext||'',gameDetailsRequired:Boolean(article.gameDetailsRequired)})}
   ];
   // Keep the known-working GPT-OSS request unchanged. Gemma uses its current completion budget.
   const options=model.includes('gemma-4')?{messages,temperature:0.15,max_completion_tokens:2048,chat_template_kwargs:{enable_thinking:false}}:{messages,temperature:0.15,max_tokens:650};
