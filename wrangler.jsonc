@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "game-scanner",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": true,
+  "ai": { "binding": "AI" },
+  "d1_databases": [{ "binding": "DB" }],
+  "triggers": { "crons": ["0 */3 * * *"] },
+  "vars": {
+    "PUBLISH_ENABLED": "false",
+    "MAX_POSTS_PER_DAY": "8",
+    "MAX_ARTICLE_AGE_HOURS": "72",
+    "AI_MODEL": "@cf/openai/gpt-oss-20b",
+    "KZ_UTC_OFFSET_HOURS": "5",
+    "USE_SOURCE_IMAGES": "false"
+  }
+}
