@@ -2,7 +2,7 @@
 export const SOURCES=Object.freeze([
   {name:'Gematsu',url:'https://www.gematsu.com/feed',hosts:['www.gematsu.com','gematsu.com'],media:['gematsu.com'],priority:2},
   {name:'PlayStation Blog',url:'https://blog.playstation.com/feed/',hosts:['blog.playstation.com'],media:['playstation.com'],priority:4},
-  {name:'PC Gamer',url:'https://www.pcgamer.com/feed/',hosts:['www.pcgamer.com','pcgamer.com'],media:['pcgamer.com','futurecdn.net'],priority:2},
+  {name:'PC Gamer',url:'https://www.pcgamer.com/feeds.xml',hosts:['www.pcgamer.com','pcgamer.com'],media:['pcgamer.com','futurecdn.net'],priority:2},
   {name:'Video Games Chronicle',url:'https://www.videogameschronicle.com/feed/',hosts:['www.videogameschronicle.com','videogameschronicle.com'],media:['videogameschronicle.com','gnwcdn.com'],priority:1},
   {name:'Steam',url:'https://store.steampowered.com/feeds/news/collection/steam',extraFeeds:['https://store.steampowered.com/feeds/news/collection/featured/'],hosts:['store.steampowered.com','steamcommunity.com','www.steamcommunity.com'],media:['steamstatic.com','steamusercontent.com','steamcdn-a.akamaihd.net','steampowered.com'],priority:5},
   {name:'IGN',url:'https://www.ign.com/rss/v2/articles/feed',hosts:['www.ign.com','ign.com'],media:['ign.com','ignimgs.com'],priority:2},
