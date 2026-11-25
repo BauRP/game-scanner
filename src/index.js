@@ -5,9 +5,16 @@ import {fetchNews} from './news.js';
 import {initialize,dayKey,alreadyAttempted,publishedCount,claim,markSent,markFailed,releaseClaim,reserveHour,recentTitleKeys,titleKey,recordCycle,cycleHistory,releaseHour,isSimilarTitle,recentCategories} from './storage.js';
 import {writePost,EditorialSkip} from './ai.js';
 import {previewHtml,previewStatus,createAiPreview,refreshPreviewImage} from './preview.js';
+import {usageStatus} from './usage.js';
 import {publishPost,telegramCall} from './telegram.js';
 const intVal=(value,fallback,min,max)=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
 const adminAllowed=(request,env)=>Boolean(env.ADMIN_KEY&&request.headers.get('Authorization')==='Bearer '+env.ADMIN_KEY);
+async function authorizedTool(request,env){
+ if(adminAllowed(request,env))return true;
+ if(!env.ADMIN_KEY||!/^application\/x-www-form-urlencoded(?:;|$)/i.test(request.headers.get('content-type')||''))return false;
+ if(Number(request.headers.get('content-length')||0)>2048)return false;
+ try{const reader=request.body?.getReader();if(!reader)return false;let size=0,body='';const decoder=new TextDecoder();try{while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>2048)return false;body+=decoder.decode(value,{stream:true});}body+=decoder.decode();}finally{await reader.cancel().catch(()=>{});}return new URLSearchParams(body).get('admin_key')===env.ADMIN_KEY;}catch{return false;}
+}
 const commissioned=r=>r.status==='sent'&&r.primaryVerified===true&&r.backupVerified===true&&r.imageMode==='publisher'&&Number.isInteger(r.messageId)&&r.messageId>0;
 export async function runCycle(env,deps={}){
   if(env.PUBLISH_ENABLED!=='true')return {status:'disabled'};
@@ -22,6 +29,8 @@ export async function runCycle(env,deps={}){
   await initialize(env.DB);
   if(await publishedCount(env.DB,day)>=max)return {status:'daily_limit',day};
   if(!await reserveHour(env.DB,now))return {status:'hour_already_reserved',day};
+  const usage=await usageStatus(env.DB);
+  if(usage.quotaExhausted||usage.estimatedNeurons>=9000)return {status:'daily_ai_quota',day};
   const previousTitles=await recentTitleKeys(env.DB,now);
   const recent=await recentCategories(env.DB,now);
   const {articles,errors=[],feedStats=[]}=await (deps.fetchNews||fetchNews)(deps.fetchFn||fetch,now,intVal(env.MAX_ARTICLE_AGE_HOURS,72,1,168));
@@ -126,7 +135,8 @@ export default {
   },
   async fetch(request,env){
     const url=new URL(request.url);
-    if(request.method==='POST'&&['/ai-preview','/ai-preview-image','/test-message'].includes(url.pathname)&&!adminAllowed(request,env))return new Response('Unauthorized',{status:401});
+    if(request.method==='POST'&&['/ai-preview','/ai-preview-image','/test-message'].includes(url.pathname)&&!await authorizedTool(request,env))return new Response('Unauthorized',{status:401});
+    if(url.pathname==='/ai-usage'&&request.method==='GET')return Response.json(await usageStatus(env.DB),{headers:{'Cache-Control':'no-store'}});
     if(url.pathname==='/publication-status'&&request.method==='GET')return Response.json(await cycleHistory(env.DB),{headers:{'Cache-Control':'no-store'}});
     if(url.pathname==='/source-quality'&&request.method==='GET')return Response.json(await qualityStatus(env.DB),{headers:{'Cache-Control':'no-store'}});
     if(url.pathname==='/commissioning-status'&&request.method==='GET'){
@@ -150,6 +160,7 @@ export default {
     }
     if(url.pathname==='/test-message'){
       if(request.method==='POST'){
+        if(env.PUBLISH_ENABLED==='true')return new Response('Тестовая отправка недоступна во время автоматической рассылки.',{status:409});
         try{
           const result=await runOneTimeTest(env);
           const lines={
@@ -166,7 +177,7 @@ export default {
           return new Response('Сбой теста. Открой Worker Logs.',{status:500,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}});
         }
       }
-      if(request.method==='GET')return new Response('<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Game Scanner — тест</title><body style="font:18px system-ui;max-width:580px;margin:70px auto;padding:20px"><h1>🎮 Game Scanner</h1><p>Проверка связи с Telegram. Кнопка отправляет одно тестовое сообщение. Автоматические новости остаются выключенными.</p><form method="post" action="/test-message"><button style="font:inherit;padding:14px 20px;cursor:pointer">Отправить один тест</button></form><p><a href="/health">Проверить состояние</a></p></body></html>',{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'}});
+      if(request.method==='GET')return new Response('<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Game Scanner — тест</title><body style="font:18px system-ui;max-width:580px;margin:70px auto;padding:20px"><h1>🎮 Game Scanner</h1><p>Проверка связи с Telegram. Кнопка отправляет одно тестовое сообщение. Автоматические новости остаются выключенными.</p><form method="post" action="/test-message"><label>Ключ администратора <input name="admin_key" type="password" required autocomplete="off"></label><button style="font:inherit;padding:14px 20px;cursor:pointer">Отправить один тест</button></form><p><a href="/health">Проверить состояние</a></p></body></html>',{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'}});
       return new Response('Method Not Allowed',{status:405,headers:{'Allow':'GET, POST'}});
     }
     if(request.method==='GET'&&url.pathname==='/health'){
