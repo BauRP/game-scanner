@@ -2,6 +2,7 @@ import {fetchNews} from './news.js';
 import {assessArticle} from './editorial.js';
 import {writePost,BACKUP_MODEL,PRIMARY_MODEL,modelError} from './ai.js';
 import {findArticleImage} from './images.js';
+import {enrichArticle} from './news.js';
 import {sendPublisherPhoto} from './telegram.js';
 import {initialize,dayKey,alreadyAttempted,claim,markSent,markFailed} from './storage.js';
 
@@ -57,7 +58,8 @@ export async function commissionOnce(env,deps={}){
       if(image){picked={article,image};break;}
     }
     if(!picked)return save('no_original_image');
-    const {article,image}=picked;
+    const {image}=picked;
+    const article=picked.article.feedContext!==undefined?await enrichArticle(picked.article,assessArticle(picked.article),fetchFn):picked.article;
     const primary=env.AI_MODEL||PRIMARY_MODEL, model=env.AI_BACKUP_MODEL||BACKUP_MODEL;
     const editorial=assessArticle(article);
     const check=async(name)=>{

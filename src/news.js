@@ -1,5 +1,5 @@
 import {extractInlineImages,trustedImageUrl} from './images.js';
-import { SOURCES } from './sources.js';
+import { SOURCES, FEEDS, sourceByName } from './sources.js';
 
 const MAX_FEED_BYTES = 750000;
 const MAX_ITEMS_PER_FEED = 20;
@@ -31,7 +31,7 @@ function attr(xml,name) {
 export function normalizedUrl(value,allowedHosts) {
   try {
     const u=new URL(decodeEntities(value.trim()));
-    if(u.protocol!=='https:'||u.username||u.password||!allowedHosts.includes(u.hostname.toLowerCase()))return '';
+    if(u.protocol!=='https:'||u.username||u.password||u.port||!allowedHosts.includes(u.hostname.toLowerCase()))return '';
     for(const k of [...u.searchParams.keys()])if(/^(utm_|fbclid$|gclid$|ref$)/i.test(k))u.searchParams.delete(k);
     u.hash='';
     return u.href;
@@ -64,7 +64,8 @@ export function parseFeed(xml,source) {
     const description=cleanText(tag(block,'description')||tag(block,'summary')||tag(block,'content:encoded'),540);
     const rawDate=cleanText(tag(block,'pubDate')||tag(block,'published')||tag(block,'updated'),80);
     const publishedAt=Date.parse(rawDate);
-    const article={title,url,description,publishedAt,source:source.name};
+    const feedContext=cleanText(tag(block,'content:encoded')||tag(block,'content')||tag(block,'description')||tag(block,'summary'),3200);
+    const article={title,url,description,feedContext,publishedAt,source:source.name};
     const candidates=mediaUrls(block).map(u=>trustedImageUrl(u,article)).filter(Boolean);
     for(const field of ['description','summary','content:encoded','content']){
       const raw=tag(block,field).replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,'$1');
@@ -78,10 +79,10 @@ export function eligible(item,now,maxAgeHours=72) {
   const age=now-item.publishedAt;
   return age>=-900000&&age<=maxAgeHours*3600000&&!/^(review|opinion|best deals|sponsored):/i.test(item.title);
 }
-export function rankNews(items) {
+export function rankNews(items,qualityBonus=()=>0,quality={}) {
   const score=(a)=>{
     const all=(a.title+' '+a.description).toLowerCase();
-    let n=a.publishedAt/3600000;
+    let n=a.publishedAt/3600000+qualityBonus(quality[a.source])+(sourceByName(a.source)?.priority||0)+(a.imageCandidates?.length||a.image?6:0);
     if(/free (game|games)|free to keep|free-to-play|бесплатн|giveaway|available free/i.test(all))n+=24;
     if(/steam|epic games|pc release|gameplay|trailer|release date|update|announc|launch|playstation/i.test(all))n+=5;
     if(/sale|deal|discount|hardware|gift card|coupon/i.test(all))n-=8;
@@ -90,22 +91,91 @@ export function rankNews(items) {
   return [...items].sort((a,b)=>score(b)-score(a));
 }
 export async function fetchNews(fetchFn=fetch,now=Date.now(),maxAgeHours=72) {
-  const results=await Promise.allSettled(SOURCES.map(async source=>{
-    const res=await fetchFn(source.url,{
+  const results=[];
+  let redirects=0;
+  for(let i=0;i<FEEDS.length;i+=4)results.push(...await Promise.allSettled(FEEDS.slice(i,i+4).map(async source=>{
+    let url=source.url;
+    const options={redirect:'manual',
       headers:{'Accept':'application/rss+xml, application/atom+xml, application/xml, text/xml','User-Agent':'GameScannerNewsBot/1.0'},
       signal:AbortSignal.timeout(9000)
-    });
+    };
+    let res=await fetchFn(url,options);
+    if([301,302,303,307,308].includes(res.status)){
+      const loc=res.headers.get('location');await res.body?.cancel().catch(()=>{});
+      const next=loc?normalizedUrl(new URL(loc,url).href,[...source.hosts,new URL(source.url).hostname]):'';
+      if(!next||redirects>=6)throw Error('feed redirect unavailable');
+      redirects++;res=await fetchFn(next,options);
+    }
     if(!res.ok)throw new Error(source.name+' HTTP '+res.status);
     const len=Number(res.headers.get('content-length')||0);
-    if(len>MAX_FEED_BYTES)throw new Error(source.name+' feed too large');
-    return parseFeed((await res.text()).slice(0,MAX_FEED_BYTES),source).filter(item=>eligible(item,now,maxAgeHours));
-  }));
+    if(len>MAX_FEED_BYTES){await res.body?.cancel().catch(()=>{});throw new Error(source.name+' feed too large');}
+    const xml=await articleHtml(res,MAX_FEED_BYTES);
+    if(!/<(?:rss|feed|rdf:RDF)\b/i.test(xml)||/<html\b/i.test(xml.slice(0,1000)))throw Error('invalid RSS or Atom response');
+    return parseFeed(xml,source).filter(item=>eligible(item,now,maxAgeHours));
+  })));
   const items=[],errors=[];
   for(let i=0;i<results.length;i++){
     if(results[i].status==='fulfilled')items.push(...results[i].value);
-    else errors.push(SOURCES[i].name+': '+String(results[i].reason?.message||'unavailable').slice(0,120));
+    else errors.push(FEEDS[i].name+': '+String(results[i].reason?.message||'unavailable').slice(0,120));
   }
   const unique=new Map();
   for(const item of rankNews(items))if(!unique.has(item.url))unique.set(item.url,item);
-  return {articles:[...unique.values()],errors};
+  return {articles:[...unique.values()],errors,feedStats:FEEDS.map((f,i)=>({source:f.name,ok:results[i].status==='fulfilled',articles:results[i].value?.length||0,withImage:results[i].value?.filter(a=>a.imageCandidates.length).length||0}))};
+}
+
+export function needsGameContext(article,editorial={}){
+  return /^(Новые игры и релизы|Анонсы и трейлеры)$/.test(editorial.category||'')||
+    /\b(now available|out now|launch(?:es|ed)?|release(?:d| date)?|announc(?:es|ed|ement)|unveil(?:s|ed)?|reveal(?:s|ed)?|debut|gameplay trailer|new trailer)\b/i.test(article.title||'');
+}
+export function extractArticleContext(html){
+  const text=String(html).replace(/<(script|style|nav|aside|footer|form|noscript|iframe)\b[^>]*>[\s\S]*?<\/\1>/gi,' ');
+  const main=text.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1]||
+    text.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1];
+  if(!main)return '';
+  const parts=[];
+  for(const [,p] of main.matchAll(/<(?:p|li)\b[^>]*>([\s\S]*?)<\/(?:p|li)>/gi)){
+    const value=cleanText(p,700);
+    if(value.length<35||/^(?:read more|related|subscribe|advertisement|follow us|sign up|share this|cookie|privacy policy|comments\b)/i.test(value))continue;
+    if(!parts.includes(value))parts.push(value);
+    if(parts.join(' ').length>=3200)break;
+  }
+  return parts.join(' ').slice(0,3200);
+}
+async function articleHtml(response,limit=1000000){
+  const reader=response.body?.getReader();
+  if(!reader)return '';
+  const decoder=new TextDecoder();let size=0,html='';
+  try{
+    while(size<limit){
+      const {done,value}=await reader.read();if(done)break;
+      const chunk=value.subarray(0,limit-size);size+=chunk.byteLength;
+      html+=decoder.decode(chunk,{stream:true});
+    }
+    return html+decoder.decode();
+  }finally{await reader.cancel().catch(()=>{});}
+}
+export async function enrichArticle(article,editorial={},fetchFn=fetch){
+  if(!needsGameContext(article,editorial))return article;
+  const source=SOURCES.find(s=>s.name===article.source);
+  const feed=String(article.feedContext||'').slice(0,3200);
+  let page='';
+  if(source){
+    let url=normalizedUrl(String(article.url||''),source.hosts);
+    try{
+      const deadline=Date.now()+8000;
+      for(let i=0;i<3&&url&&Date.now()<deadline;i++){
+        if(new URL(url).port)break;
+        const response=await fetchFn(url,{redirect:'manual',headers:{Accept:'text/html,application/xhtml+xml','User-Agent':'GameScannerNewsBot/1.0'},signal:AbortSignal.timeout(Math.max(1,deadline-Date.now()))});
+        if([301,302,303,307,308].includes(response.status)){
+          const loc=response.headers.get('location');await response.body?.cancel().catch(()=>{});
+          url=loc?normalizedUrl(new URL(loc,url).href,source.hosts):'';continue;
+        }
+        if(response.ok&&/text\/html|application\/xhtml\+xml/i.test(response.headers.get('content-type')||''))page=extractArticleContext(await articleHtml(response));
+        else await response.body?.cancel().catch(()=>{});
+        break;
+      }
+    }catch{/* Preserve verified feed information if the article is temporarily inaccessible. */}
+  }
+  const context=[article.description,feed,page].filter(Boolean).filter((v,i,a)=>!a.some((other,j)=>j!==i&&other.includes(v)&&(other.length>v.length||j<i))).join('\n').slice(0,6500);
+  return {...article,gameDetailsRequired:true,articleContext:context,contextSource:page?'publisher_article':feed?'rss':'summary'};
 }
