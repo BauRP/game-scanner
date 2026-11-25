@@ -63,6 +63,10 @@ export function verifyDraft(draft,article,editorial={}){
   const evidence=String(article?.title||'')+' '+String(article?.description||'')+' '+String(article?.articleContext||'');
   const produced=draft.headline+' '+draft.body;
   const inputNums=new Set(numbers(evidence));
+  // Require explicit evidence for monetary values rather than borrowing unrelated numerals.
+  const money=(value)=>[...value.matchAll(/(?:\b(USD|EUR|GBP)\s*|([$€£])\s*)(\d+(?:[.,]\d+)?)/gi),...value.matchAll(/(\d+(?:[.,]\d+)?)\s*(доллар(?:ов|а)?|евро|фунт(?:ов|а)?|dollars?|euros?|pounds?|USD|EUR|GBP)\b/gi)].map(m=>{const prefix=m[3]!==undefined;const currency=String(prefix?(m[1]||m[2]):m[2]).toLowerCase();const unit=/usd|\$|dollar|доллар/.test(currency)?'USD':/eur|€|euro|евро/.test(currency)?'EUR':'GBP';return unit+':'+String(prefix?m[3]:m[1]).replace(',','.');});
+  const prices=new Set(money(evidence));
+  for(const value of money(produced))if(!prices.has(value))throw new EditorialSkip('unsupported_price');
   const access=editorial.accessType;
   if(['subscription','trial','addon','pre_release'].includes(access)&&/забрать навсегда|получить игру навсегда|бесплатная раздача полной игры/i.test(produced))throw new EditorialSkip('wrong_access_type');
   if(access==='pre_release'&&/игра (?:уже )?(?:вышла|состоялся релиз)|полноценный релиз состоялся/i.test(produced)&&!/\b(?:full release|out of early access|1\.0 release)\b/i.test(evidence))throw new EditorialSkip('premature_release');
