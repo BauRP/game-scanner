@@ -123,8 +123,8 @@ export async function fetchNews(fetchFn=fetch,now=Date.now(),maxAgeHours=72) {
     else errors.push(FEEDS[i].name+': '+String(results[i].reason?.message||'unavailable').slice(0,120));
   }
   const unique=new Map();
-  for(const item of rankNews(items))if(!unique.has(item.url))unique.set(item.url,item);
-  return {articles:[...unique.values()],errors,feedStats:FEEDS.map((f,i)=>({source:f.name,ok:results[i].status==='fulfilled',articles:results[i].value?.length||0,withImage:results[i].value?.filter(a=>a.imageCandidates.length).length||0}))};
+  for(const item of items){const old=unique.get(item.url);if(!old||item.publishedAt>old.publishedAt||(item.publishedAt===old.publishedAt&&item.imageCandidates.length>old.imageCandidates.length))unique.set(item.url,item);}
+  return {articles:rankNews([...unique.values()]),errors,feedStats:FEEDS.map((f,i)=>({source:f.name,ok:results[i].status==='fulfilled',articles:results[i].value?.length||0,withImage:results[i].value?.filter(a=>a.imageCandidates.length).length||0}))};
 }
 
 export function needsGameContext(article,editorial={}){
@@ -136,12 +136,12 @@ export function extractArticleContext(html){
   const main=text.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1]||
     text.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1];
   if(!main)return '';
-  const parts=[];
+  const parts=[];let contextLength=0;
   for(const [,p] of main.matchAll(/<(?:p|li)\b[^>]*>([\s\S]*?)<\/(?:p|li)>/gi)){
     const value=cleanText(p,700);
     if(value.length<35||/^(?:read more|related|subscribe|advertisement|follow us|sign up|share this|cookie|privacy policy|comments\b|recommended|you may also like|related articles|affiliate disclosure)/i.test(value))continue;
-    if(!parts.includes(value))parts.push(value);
-    if(parts.join(' ').length>=3200)break;
+    if(!parts.includes(value)){parts.push(value);contextLength+=value.length+1;}
+    if(contextLength>=3200)break;
   }
   return parts.join(' ').slice(0,3200);
 }
