@@ -207,7 +207,7 @@ export default {
       const ready=requested&&Boolean(env.DB&&env.AI&&env.TELEGRAM_BOT_TOKEN&&env.TELEGRAM_CHAT_ID)&&(env.COMMISSION_ONCE!=='true'||commissioned(state));
       return Response.json({ok:true,service:'game-scanner',publishing:requested,readyToPublish:ready,commissioningState:state.status,history,
         telegramConfigured:Boolean(env.TELEGRAM_BOT_TOKEN&&env.TELEGRAM_CHAT_ID),storageConfigured:Boolean(env.DB),
-        testStatus,commissioning:env.COMMISSION_ONCE==='true',imagePipelineVersion:'original-photo-v2',aiDiagnosticsVersion:2,primaryModel:env.AI_MODEL||'@cf/openai/gpt-oss-20b',backupModel:env.AI_BACKUP_MODEL||'@cf/google/gemma-4-26b-a4b-it',sourceImages:env.USE_SOURCE_IMAGES==='true',sourceExpansionVersion:2,translationPolicy:'russian-required-v1',publicationIntervalMinutes:60,maxPostsPerDay:intVal(env.MAX_POSTS_PER_DAY,24,1,24),quotaResetUtc:'00:00'},{headers:{'Cache-Control':'no-store'}});
+        testStatus,commissioning:env.COMMISSION_ONCE==='true',imagePipelineVersion:'original-photo-v2',aiDiagnosticsVersion:2,primaryModel:env.AI_MODEL||'@cf/openai/gpt-oss-20b',backupModel:env.AI_BACKUP_MODEL||'@cf/google/gemma-4-26b-a4b-it',sourceImages:env.USE_SOURCE_IMAGES==='true',sourceExpansionVersion:2,translationPolicy:'russian-required-v1',captionPolicy:'headline-body-v1',publicationIntervalMinutes:60,maxPostsPerDay:intVal(env.MAX_POSTS_PER_DAY,24,1,24),quotaResetUtc:'00:00'},{headers:{'Cache-Control':'no-store'}});
     }
     if(request.method==='POST'&&url.pathname==='/run'){
       if(!env.ADMIN_KEY||request.headers.get('Authorization')!=='Bearer '+env.ADMIN_KEY)return new Response('Unauthorized',{status:401});
