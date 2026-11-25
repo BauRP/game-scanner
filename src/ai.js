@@ -10,6 +10,7 @@ const SYSTEM = [
   'Слухи нельзя выдавать за факт: всегда используй «по сообщениям» или «предположительно», если материал не подтверждён.',
   'В категории бесплатных раздач сообщай только о временной раздаче платной игры. В категории релизов допустимы новые free-to-play игры; не называй их временной раздачей.',
   'Различай предзаказ, ранний доступ, перенос релиза, ремейк, ремастер, демо, дополнение, временную раздачу и доступ по подписке. Не обещай получение полной игры навсегда или доступность в регионе без прямого подтверждения. Не превращай слова о будущем событии в сообщение о состоявшемся событии.',
+  'Не добавляй строку «Источник», адрес сайта или подпись редакции. Если важно для достоверности (например, при слухе), допускается естественно назвать автора сообщения внутри текста.',
   'Текст должен быть самобытным, нейтральным, понятным, без кликбейта, без ссылок, хештегов, markdown и неподтверждённых обещаний.',
   'Ответ СТРОГО в JSON: {"publish":true,"headline":"...","body":"..."}. Заголовок до 85 символов, основной текст от 1 до 3 коротких предложений до 420 символов.'
 ].join(' ');
@@ -65,7 +66,7 @@ export function verifyDraft(draft,article,editorial={}){
   const produced=draft.headline+' '+draft.body;
   const inputNums=new Set(numbers(evidence));
   // Require explicit evidence for monetary values rather than borrowing unrelated numerals.
-  const money=(value)=>[...value.matchAll(/(?:\b(USD|EUR|GBP)\s*|([$€£])\s*)(\d+(?:[.,]\d+)?)/gi),...value.matchAll(/(\d+(?:[.,]\d+)?)\s*(доллар(?:ов|а)?|евро|фунт(?:ов|а)?|dollars?|euros?|pounds?|USD|EUR|GBP)\b/gi)].map(m=>{const prefix=m[3]!==undefined;const currency=String(prefix?(m[1]||m[2]):m[2]).toLowerCase();const unit=/usd|\$|dollar|доллар/.test(currency)?'USD':/eur|€|euro|евро/.test(currency)?'EUR':'GBP';return unit+':'+String(prefix?m[3]:m[1]).replace(',','.');});
+  const money=(value)=>[...value.matchAll(/(?:\b(USD|EUR|GBP)\s*|([$€£])\s*)(\d+(?:[.,]\d+)?)/gi),...value.matchAll(/(\d+(?:[.,]\d+)?)\s*(доллар(?:ов|а)?|евро|фунт(?:ов|а)?|dollars?|euros?|pounds?|USD|EUR|GBP)(?![\p{L}])/giu)].map(m=>{const prefix=m[3]!==undefined;const currency=String(prefix?(m[1]||m[2]):m[2]).toLowerCase();const unit=/usd|\$|dollar|доллар/.test(currency)?'USD':/eur|€|euro|евро/.test(currency)?'EUR':'GBP';return unit+':'+String(prefix?m[3]:m[1]).replace(',','.');});
   const prices=new Set(money(evidence));
   for(const value of money(produced))if(!prices.has(value))throw new EditorialSkip('unsupported_price');
   const access=editorial.accessType;
@@ -78,7 +79,7 @@ export function verifyDraft(draft,article,editorial={}){
   const platforms=[[/\bPS5\b|PlayStation 5/gi,/\bPS5\b|PlayStation 5/i],[/\bPS4\b|PlayStation 4/gi,/\bPS4\b|PlayStation 4/i],[/\bXbox Series\b/gi,/\bXbox Series\b/i],[/\bNintendo Switch\b/gi,/\bNintendo Switch\b/i]];
   for(const [out,src] of platforms)if(produced.match(out)&&!src.test(evidence))throw new EditorialSkip('unsupported_platform');
   for(const num of numbers(produced))if(!inputNums.has(num))throw new EditorialSkip('generated_unsupported_number');
-  if(/https?:\/\/|www\.|@[a-z\d_]+/i.test(produced))throw new EditorialSkip('generated_unwanted_link');
+  if(/https?:\/\/|www\.|@[a-z\d_]+|(?:^|\s)источник\s*:/i.test(produced))throw new EditorialSkip('generated_unwanted_link');
   // Prevent the AI from inventing or swapping English-language company names.
   // Russian attribution followed by a Latin brand must match the source excerpt.
   for(const m of produced.matchAll(/компани[яи]\s+([A-Za-z][A-Za-z0-9&.-]*(?:\s+[A-Za-z][A-Za-z0-9&.-]*){0,3})/gi)){
