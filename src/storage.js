@@ -70,14 +70,21 @@ export async function releaseHour(db,now){
  await db.prepare("DELETE FROM publication_hours WHERE hour_key=?").bind(hourKey(now)).run();
 }
 const STOP=new Set(['the','and','for','with','from','this','that','its','new','game','games','on','in','of','to','a','an','is','at','by']);
+export function prepareTitleIndex(previous){
+ const words=x=>new Set(x.split(' ').filter(w=>w.length>2&&!STOP.has(w)));
+ const numbers=x=>(x.match(/\d+(?:[.,]\d+)?/g)||[]).join(',');
+ return [...previous].map(key=>({words:words(key),numbers:numbers(key)})).filter(x=>x.words.size>=4);
+}
 export function isSimilarTitle(title,previous){
  const key=titleKey(title);if(!key)return false;
  const words=x=>new Set(x.split(' ').filter(w=>w.length>2&&!STOP.has(w)));
  const a=words(key);if(a.size<4)return false;
  const numbers=x=>(x.match(/\d+(?:[.,]\d+)?/g)||[]).join(',');
- for(const other of previous){
-   if(numbers(key)!==numbers(other))continue;
-   const b=words(other);if(b.size<4)continue;
+ const index=Array.isArray(previous)?previous:prepareTitleIndex(previous);
+ const num=numbers(key);
+ for(const other of index){
+   if(num!==other.numbers)continue;
+   const b=other.words;
    const shared=[...a].filter(x=>b.has(x)).length;
    if(shared>=4&&shared/(a.size+b.size-shared)>=0.84)return true;
  }
