@@ -40,7 +40,8 @@ export function normalizedUrl(value,allowedHosts) {
 function feedLink(xml) {
   const rss=tag(xml,'link');
   if(rss)return cleanText(rss,2048);
-  return xml.match(/<link\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*\/?\s*>/i)?.[1]||'';
+  const links=[...xml.matchAll(/<link\b[^>]*>/gi)].map(m=>({href:attr(m[0],'href'),rel:attr(m[0],'rel')}));
+  return links.find(l=>l.href&&(!l.rel||l.rel==='alternate'))?.href||'';
 }
 function mediaUrls(xml) {
   const urls=[];
@@ -88,7 +89,7 @@ export function rankNews(items,qualityBonus=()=>0,quality={}) {
     if(/sale|deal|discount|hardware|gift card|coupon/i.test(all))n-=8;
     return n;
   };
-  return [...items].sort((a,b)=>score(b)-score(a));
+  return items.map(a=>({a,score:score(a)})).sort((a,b)=>b.score-a.score).map(x=>x.a);
 }
 export async function fetchNews(fetchFn=fetch,now=Date.now(),maxAgeHours=72) {
   const results=[];
