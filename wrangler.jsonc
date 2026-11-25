@@ -6,9 +6,10 @@
   "workers_dev": true,
   "ai": { "binding": "AI" },
   "d1_databases": [{ "binding": "DB" }],
-  "triggers": { "crons": ["0 */3 * * *"] },
+  "triggers": { "crons": ["* * * * *"] },
   "vars": {
     "PUBLISH_ENABLED": "false",
+    "TEST_MESSAGE_ONCE": "game-scanner-test-20261125-01",
     "MAX_POSTS_PER_DAY": "8",
     "MAX_ARTICLE_AGE_HOURS": "72",
     "AI_MODEL": "@cf/openai/gpt-oss-20b",

@@ -1,7 +1,7 @@
 import {fetchNews} from './news.js';
 import {initialize,dayKey,alreadyAttempted,publishedCount,claim,markSent,markFailed} from './storage.js';
 import {writePost} from './ai.js';
-import {publishPost} from './telegram.js';
+import {publishPost,telegramCall} from './telegram.js';
 const intVal=(value,fallback,min,max)=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
 export async function runCycle(env,deps={}){
   if(env.PUBLISH_ENABLED!=='true')return {status:'disabled'};
@@ -30,16 +30,58 @@ export async function runCycle(env,deps={}){
   if(errors.length)console.warn('Feeds unavailable:',errors.join(' | '));
   return {status:articles.length?'no_new_articles':'no_fresh_articles',failedFeeds:errors.length,day};
 }
+
+const TEST_MESSAGE = '🎮 Game Scanner\n\n✅ Тестовая публикация! Бот успешно отправил сообщение в наш Telegram-канал.\n\nЭто только проверка связи. Автоматическая публикация игровых новостей пока выключена.';
+
+export async function runOneTimeTest(env, deps = {}) {
+  if (!env.TEST_MESSAGE_ONCE) return {status: 'not_requested'};
+  if (!env.DB || !env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return {status: 'missing_configuration'};
+  const key = String(env.TEST_MESSAGE_ONCE);
+  const db = env.DB;
+  await db.prepare("CREATE TABLE IF NOT EXISTS test_deliveries (test_key TEXT PRIMARY KEY, status TEXT NOT NULL, telegram_message_id INTEGER, recorded_at TEXT NOT NULL)").run();
+  const claimResult = await db.prepare("INSERT OR IGNORE INTO test_deliveries (test_key, status, recorded_at) VALUES (?, 'sending', ?)")
+    .bind(key, new Date().toISOString()).run();
+  if (Number(claimResult?.meta?.changes || 0) !== 1) {
+    const existing = await db.prepare("SELECT status FROM test_deliveries WHERE test_key = ?").bind(key).first();
+    return {status: existing?.status || 'already_attempted'};
+  }
+  try {
+    const result = await (deps.telegramCall || telegramCall)(
+      env.TELEGRAM_BOT_TOKEN, 'sendMessage',
+      {chat_id: env.TELEGRAM_CHAT_ID, text: TEST_MESSAGE, link_preview_options: {is_disabled: true}},
+      deps.fetchFn || fetch
+    );
+    await db.prepare("UPDATE test_deliveries SET status = 'sent', telegram_message_id = ? WHERE test_key = ?")
+      .bind(result?.message_id || null, key).run();
+    return {status: 'sent'};
+  } catch (error) {
+    await db.prepare("UPDATE test_deliveries SET status = 'failed' WHERE test_key = ?").bind(key).run();
+    console.error('One-time Telegram test failed:', String(error?.message || error).slice(0, 180));
+    return {status: 'failed'};
+  }
+}
+
 export default {
   async scheduled(event,env,ctx){
-    ctx.waitUntil(runCycle(env).then(result=>console.log('Game Scanner:',JSON.stringify(result)))
-      .catch(e=>console.error('Cycle failed:',String(e?.message||e).slice(0,140))));
+    ctx.waitUntil((async()=>{
+      if(env.TEST_MESSAGE_ONCE)console.log('Game Scanner test:',JSON.stringify(await runOneTimeTest(env)));
+      console.log('Game Scanner:',JSON.stringify(await runCycle(env)));
+    })().catch(e=>console.error('Scheduled cycle failed:',String(e?.message||e).slice(0,140))));
   },
   async fetch(request,env){
     const url=new URL(request.url);
     if(request.method==='GET'&&url.pathname==='/health'){
+      let testStatus = env.TEST_MESSAGE_ONCE ? 'pending' : 'not_requested';
+      if(env.TEST_MESSAGE_ONCE && env.DB){
+        try{
+          const row = await env.DB.prepare("SELECT status FROM test_deliveries WHERE test_key = ?")
+            .bind(String(env.TEST_MESSAGE_ONCE)).first();
+          if(row?.status)testStatus=row.status;
+        }catch{ /* The test table may not exist before the first scheduled event. */ }
+      }
       return Response.json({ok:true,service:'game-scanner',publishing:env.PUBLISH_ENABLED==='true',
-        telegramConfigured:Boolean(env.TELEGRAM_BOT_TOKEN&&env.TELEGRAM_CHAT_ID),storageConfigured:Boolean(env.DB)},{headers:{'Cache-Control':'no-store'}});
+        telegramConfigured:Boolean(env.TELEGRAM_BOT_TOKEN&&env.TELEGRAM_CHAT_ID),storageConfigured:Boolean(env.DB),
+        testStatus},{headers:{'Cache-Control':'no-store'}});
     }
     if(request.method==='POST'&&url.pathname==='/run'){
       if(!env.ADMIN_KEY||request.headers.get('Authorization')!=='Bearer '+env.ADMIN_KEY)return new Response('Unauthorized',{status:401});
