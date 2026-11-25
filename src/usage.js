@@ -1,7 +1,7 @@
 // Rates verified against Cloudflare Workers AI pricing on 2026-11-26.
 const RATES={'@cf/openai/gpt-oss-20b':[18182,27273],'@cf/google/gemma-4-26b-a4b-it':[9091,27273]};
 export function measureUsage(model,response){
- const usage=response?.usage||response?.result?.usage;
+ const usage=response?.usage||response?.result?.usage||response?.response?.usage;
  const input=usage?.prompt_tokens??usage?.input_tokens,output=usage?.completion_tokens??usage?.output_tokens;
  const rates=RATES[model];
  if(!rates||!Number.isInteger(input)||input<0||!Number.isInteger(output)||output<0)return null;
