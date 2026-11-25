@@ -9,6 +9,7 @@
   "triggers": { "crons": ["0 */3 * * *"] },
   "vars": {
     "PUBLISH_ENABLED": "false",
+    "COMMISSION_ONCE": "true",
     "TEST_MESSAGE_ONCE": "game-scanner-manual-20261125-02",
     "MAX_POSTS_PER_DAY": "8",
     "MAX_ARTICLE_AGE_HOURS": "72",

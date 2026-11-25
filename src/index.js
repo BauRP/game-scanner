@@ -1,3 +1,4 @@
+import {commissionOnce,commissioningStatus} from './commissioning.js';
 import {fetchNews} from './news.js';
 import {initialize,dayKey,alreadyAttempted,publishedCount,claim,markSent,markFailed,releaseClaim} from './storage.js';
 import {writePost,EditorialSkip} from './ai.js';
@@ -8,6 +9,10 @@ const intVal=(value,fallback,min,max)=>{const n=Number(value);return Number.isIn
 export async function runCycle(env,deps={}){
   if(env.PUBLISH_ENABLED!=='true')return {status:'disabled'};
   if(!env.DB||!env.TELEGRAM_BOT_TOKEN||!env.TELEGRAM_CHAT_ID)return {status:'missing_configuration'};
+  if(env.COMMISSION_ONCE==='true'){
+    const result=await commissioningStatus(env);
+    if(result.status!=='sent'||result.backupVerified!==true||result.imageMode!=='publisher'||!Number.isInteger(result.messageId)||result.messageId<=0)return {status:'commissioning_required'};
+  }
   const now=deps.now??Date.now();
   const day=dayKey(now,intVal(env.KZ_UTC_OFFSET_HOURS,5,-12,14));
   const max=intVal(env.MAX_POSTS_PER_DAY,8,1,10);
@@ -80,11 +85,20 @@ export async function runOneTimeTest(env, deps = {}) {
 export default {
   async scheduled(event,env,ctx){
     // Test messages are manual only, never sent by cron.
-    ctx.waitUntil(runCycle(env).then(result=>console.log('Game Scanner:',JSON.stringify(result)))
+    const work=env.PUBLISH_ENABLED!=='true'&&env.COMMISSION_ONCE==='true'?commissionOnce(env):runCycle(env);
+    ctx.waitUntil(work.then(result=>console.log('Game Scanner:',JSON.stringify(result)))
       .catch(e=>console.error('Scheduled cycle failed:',String(e?.message||e).slice(0,140))));
   },
   async fetch(request,env){
     const url=new URL(request.url);
+    if(url.pathname==='/commissioning-status'&&request.method==='GET'){
+      return Response.json(await commissioningStatus(env),{headers:{'Cache-Control':'no-store'}});
+    }
+    if(url.pathname==='/commission-once'&&request.method==='POST'){
+      if(!env.ADMIN_KEY||request.headers.get('Authorization')!=='Bearer '+env.ADMIN_KEY)return new Response('Unauthorized',{status:401});
+      try{return Response.json(await commissionOnce(env),{headers:{'Cache-Control':'no-store'}});}
+      catch{return Response.json({status:'check_failed'},{status:500});}
+    }
     if(url.pathname==='/ai-preview-image'&&request.method==='POST'){
       return refreshPreviewImage(env);
     }
@@ -128,7 +142,7 @@ export default {
       }
       return Response.json({ok:true,service:'game-scanner',publishing:env.PUBLISH_ENABLED==='true',
         telegramConfigured:Boolean(env.TELEGRAM_BOT_TOKEN&&env.TELEGRAM_CHAT_ID),storageConfigured:Boolean(env.DB),
-        testStatus,primaryModel:env.AI_MODEL||'@cf/openai/gpt-oss-20b',backupModel:env.AI_BACKUP_MODEL||'@cf/google/gemma-4-26b-a4b-it',sourceImages:env.USE_SOURCE_IMAGES==='true'},{headers:{'Cache-Control':'no-store'}});
+        testStatus,commissioning:env.COMMISSION_ONCE==='true',imagePipelineVersion:'original-photo-v2',primaryModel:env.AI_MODEL||'@cf/openai/gpt-oss-20b',backupModel:env.AI_BACKUP_MODEL||'@cf/google/gemma-4-26b-a4b-it',sourceImages:env.USE_SOURCE_IMAGES==='true'},{headers:{'Cache-Control':'no-store'}});
     }
     if(request.method==='POST'&&url.pathname==='/run'){
       if(!env.ADMIN_KEY||request.headers.get('Authorization')!=='Bearer '+env.ADMIN_KEY)return new Response('Unauthorized',{status:401});
