@@ -9,6 +9,10 @@ const intVal=(value,fallback,min,max)=>{const n=Number(value);return Number.isIn
 export async function runCycle(env,deps={}){
   if(env.PUBLISH_ENABLED!=='true')return {status:'disabled'};
   if(!env.DB||!env.TELEGRAM_BOT_TOKEN||!env.TELEGRAM_CHAT_ID)return {status:'missing_configuration'};
+  if(env.COMMISSION_ONCE==='true'){
+    const result=await commissioningStatus(env);
+    if(result.status!=='sent'||result.backupVerified!==true||result.imageMode!=='publisher'||!Number.isInteger(result.messageId)||result.messageId<=0)return {status:'commissioning_required'};
+  }
   const now=deps.now??Date.now();
   const day=dayKey(now,intVal(env.KZ_UTC_OFFSET_HOURS,5,-12,14));
   const max=intVal(env.MAX_POSTS_PER_DAY,8,1,10);
