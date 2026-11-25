@@ -64,3 +64,28 @@ export async function cycleHistory(db){
  return {available:true,lastCycle:row?{recordedAt:row.recorded_at,...JSON.parse(row.result_json)}:null,lastPublication:sent?{createdAt:sent.created_at,messageId:sent.telegram_message_id}:null};
  }catch{return {available:false};}
 }
+
+export async function releaseHour(db,now){
+ // Only called on an explicit pre-Telegram failure. Never release an ambiguous delivery.
+ await db.prepare("DELETE FROM publication_hours WHERE hour_key=?").bind(hourKey(now)).run();
+}
+const STOP=new Set(['the','and','for','with','from','this','that','its','new','game','games','on','in','of','to','a','an','is','at','by']);
+export function isSimilarTitle(title,previous){
+ const key=titleKey(title);if(!key)return false;
+ const words=x=>new Set(x.split(' ').filter(w=>w.length>2&&!STOP.has(w)));
+ const a=words(key);if(a.size<4)return false;
+ const numbers=x=>(x.match(/\d+(?:[.,]\d+)?/g)||[]).join(',');
+ for(const other of previous){
+   if(numbers(key)!==numbers(other))continue;
+   const b=words(other);if(b.size<4)continue;
+   const shared=[...a].filter(x=>b.has(x)).length;
+   if(shared>=4&&shared/(a.size+b.size-shared)>=0.84)return true;
+ }
+ return false;
+}
+export async function recentCategories(db,now){
+ try{
+ const r=await db.prepare("SELECT result_json FROM cycle_history WHERE hour_key>=? ORDER BY hour_key DESC LIMIT 6").bind(hourKey(now-6*3600000)).all();
+ return (r.results||[]).map(x=>JSON.parse(x.result_json)).filter(x=>x.status==='sent'&&x.category).map(x=>x.category);
+ }catch{return [];}
+}
