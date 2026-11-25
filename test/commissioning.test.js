@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {commissionOnce,commissioningStatus} from '../src/commissioning.js';
-import worker from '../src/index.js';
+import worker,{runCycle} from '../src/index.js';
 
 const item={source:'Gematsu',title:'Doom gameplay trailer released',description:'A new gameplay trailer for Doom was released.',url:'https://www.gematsu.com/2026/11/doom-trailer',publishedAt:Date.now(),image:'https://www.gematsu.com/images/doom.png'};
 function database(){
@@ -67,4 +67,22 @@ test('manual commissioning endpoint rejects unauthenticated requests',async()=>{
  const {env}=setup();env.ADMIN_KEY='secret';
  const r=await worker.fetch(new Request('https://example.com/commission-once',{method:'POST'}),env);
  assert.equal(r.status,401);
+});
+
+test('normal publishing stays blocked until real commissioning delivery is recorded',async()=>{
+ const {env,deps,calls}=setup();env.PUBLISH_ENABLED='true';
+ assert.equal((await runCycle(env,deps)).status,'commissioning_required');
+ assert.equal(calls.send,0);
+});
+test('concurrent commissioning calls cannot send two news posts',async()=>{
+ const {env,deps,calls}=setup();
+ const results=await Promise.all([commissionOnce(env,deps),commissionOnce(env,deps)]);
+ assert.ok(results.some(r=>r.status==='sent'));assert.equal(calls.send,1);
+});
+test('commissioning searches another eligible story if the first has no photo',async()=>{
+ const {env,deps,calls}=setup();const second={...item,url:item.url+'-second'};
+ deps.fetchNews=async()=>({articles:[item,second]});
+ const original=deps.findArticleImage;deps.findArticleImage=async a=>a.url===item.url?null:original(a);
+ const r=await commissionOnce(env,deps);
+ assert.equal(r.status,'sent');assert.equal(r.articleUrl,second.url);assert.equal(calls.send,1);
 });
