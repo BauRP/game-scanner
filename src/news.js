@@ -79,10 +79,10 @@ export function eligible(item,now,maxAgeHours=72) {
   const age=now-item.publishedAt;
   return age>=-900000&&age<=maxAgeHours*3600000&&!/^(review|opinion|best deals|sponsored):/i.test(item.title);
 }
-export function rankNews(items) {
+export function rankNews(items,qualityBonus=()=>0,quality={}) {
   const score=(a)=>{
     const all=(a.title+' '+a.description).toLowerCase();
-    let n=a.publishedAt/3600000+(sourceByName(a.source)?.priority||0)+(a.imageCandidates?.length||a.image?6:0);
+    let n=a.publishedAt/3600000+qualityBonus(quality[a.source])+(sourceByName(a.source)?.priority||0)+(a.imageCandidates?.length||a.image?6:0);
     if(/free (game|games)|free to keep|free-to-play|бесплатн|giveaway|available free/i.test(all))n+=24;
     if(/steam|epic games|pc release|gameplay|trailer|release date|update|announc|launch|playstation/i.test(all))n+=5;
     if(/sale|deal|discount|hardware|gift card|coupon/i.test(all))n-=8;
