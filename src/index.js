@@ -11,7 +11,7 @@ export async function runCycle(env,deps={}){
   if(!env.DB||!env.TELEGRAM_BOT_TOKEN||!env.TELEGRAM_CHAT_ID)return {status:'missing_configuration'};
   if(env.COMMISSION_ONCE==='true'){
     const result=await commissioningStatus(env);
-    if(result.status!=='sent'||result.backupVerified!==true||result.imageMode!=='publisher'||!Number.isInteger(result.messageId)||result.messageId<=0)return {status:'commissioning_required'};
+    if(result.status!=='sent'||result.primaryVerified!==true||result.backupVerified!==true||result.imageMode!=='publisher'||!Number.isInteger(result.messageId)||result.messageId<=0)return {status:'commissioning_required'};
   }
   const now=deps.now??Date.now();
   const day=dayKey(now,intVal(env.KZ_UTC_OFFSET_HOURS,5,-12,14));
@@ -85,6 +85,8 @@ export async function runOneTimeTest(env, deps = {}) {
 export default {
   async scheduled(event,env,ctx){
     // Test messages are manual only, never sent by cron.
+    // The temporary minute trigger is for commissioning only, never for regular news.
+    if(env.PUBLISH_ENABLED==='true'&&event?.cron&&event.cron!=='0 */3 * * *')return;
     const work=env.PUBLISH_ENABLED!=='true'&&env.COMMISSION_ONCE==='true'?commissionOnce(env):runCycle(env);
     ctx.waitUntil(work.then(result=>console.log('Game Scanner:',JSON.stringify(result)))
       .catch(e=>console.error('Scheduled cycle failed:',String(e?.message||e).slice(0,140))));
@@ -142,7 +144,7 @@ export default {
       }
       return Response.json({ok:true,service:'game-scanner',publishing:env.PUBLISH_ENABLED==='true',
         telegramConfigured:Boolean(env.TELEGRAM_BOT_TOKEN&&env.TELEGRAM_CHAT_ID),storageConfigured:Boolean(env.DB),
-        testStatus,commissioning:env.COMMISSION_ONCE==='true',imagePipelineVersion:'original-photo-v2',primaryModel:env.AI_MODEL||'@cf/openai/gpt-oss-20b',backupModel:env.AI_BACKUP_MODEL||'@cf/google/gemma-4-26b-a4b-it',sourceImages:env.USE_SOURCE_IMAGES==='true'},{headers:{'Cache-Control':'no-store'}});
+        testStatus,commissioning:env.COMMISSION_ONCE==='true',imagePipelineVersion:'original-photo-v2',aiDiagnosticsVersion:2,primaryModel:env.AI_MODEL||'@cf/openai/gpt-oss-20b',backupModel:env.AI_BACKUP_MODEL||'@cf/google/gemma-4-26b-a4b-it',sourceImages:env.USE_SOURCE_IMAGES==='true'},{headers:{'Cache-Control':'no-store'}});
     }
     if(request.method==='POST'&&url.pathname==='/run'){
       if(!env.ADMIN_KEY||request.headers.get('Authorization')!=='Bearer '+env.ADMIN_KEY)return new Response('Unauthorized',{status:401});
