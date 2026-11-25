@@ -43,36 +43,31 @@ export function parseDraft(result,article,editorial){
   const draft={headline,body};
   return article?verifyDraft(draft,article,editorial):draft;
 }
+export const PRIMARY_MODEL='@cf/openai/gpt-oss-20b';
+export const BACKUP_MODEL='@cf/google/gemma-4-26b-a4b-it';
 export async function writePost(article,env,fetchFn=fetch,editorial={}){
+  if(!env.AI)throw new Error('AI binding unavailable');
   const messages=[
     {role:'system',content:SYSTEM},
-    {role:'user',content:JSON.stringify({source:article.source,category:editorial.category||'Главные игровые новости',rumor:Boolean(editorial.rumor),title:article.title,excerpt:article.description||''})}
+    {role:'user',content:JSON.stringify({source:article.source,category:editorial.category||'Главные игровые новости',
+      rumor:Boolean(editorial.rumor),title:article.title,excerpt:article.description||''})}
   ];
-  const failures=[];
-  if(env.AI){
+  const models=[env.AI_MODEL||PRIMARY_MODEL,env.AI_BACKUP_MODEL||BACKUP_MODEL];
+  const seen=new Set(),errors=[];
+  for(const model of models){
+    if(seen.has(model))continue;
+    seen.add(model);
     try{
-      const r=await env.AI.run(env.AI_MODEL||'@cf/openai/gpt-oss-20b',{messages,max_tokens:550,temperature:0.15,reasoning_effort:'low'});
-      return {...parseDraft(r,article,editorial),engine:'cloudflare'};
+      const options={messages,temperature:0.15,max_tokens:model.includes('gemma-4')?950:650};
+      if(model.includes('gpt-oss'))options.reasoning_effort='low';
+      const result=await env.AI.run(model,options);
+      const draft=parseDraft(result,article,editorial);
+      return {...draft,engine:model};
     }catch(e){
-      if(e instanceof EditorialSkip)throw e;
-      failures.push('cloudflare');
-      console.warn('Cloudflare AI did not produce a usable draft:',String(e?.message||e).slice(0,110));
+      const reason=e instanceof EditorialSkip?e.message:'model_unavailable_or_invalid';
+      console.warn('Game Scanner model failure:',model,reason);
+      errors.push(model+':'+reason);
     }
   }
-  if(env.GROQ_API_KEY){
-    try{
-      const r=await fetchFn('https://api.groq.com/openai/v1/chat/completions',{
-        method:'POST',headers:{Authorization:'Bearer '+env.GROQ_API_KEY,'Content-Type':'application/json'},
-        body:JSON.stringify({model:'openai/gpt-oss-20b',messages,temperature:0.15,max_completion_tokens:550}),
-        signal:AbortSignal.timeout(12000)
-      });
-      if(!r.ok)throw new Error('Groq HTTP '+r.status);
-      return {...parseDraft(await r.json(),article,editorial),engine:'groq'};
-    }catch(e){
-      if(e instanceof EditorialSkip)throw e;
-      failures.push('groq');
-      console.warn('Groq AI did not produce a usable draft:',String(e?.message||e).slice(0,110));
-    }
-  }
-  throw new Error('AI_UNAVAILABLE:'+failures.join(','));
+  throw new Error('NO_VERIFIED_AI_DRAFT: '+errors.join(', ').slice(0,230));
 }

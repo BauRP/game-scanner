@@ -42,8 +42,14 @@ function feedLink(xml) {
   return xml.match(/<link\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*\/?\s*>/i)?.[1]||'';
 }
 function mediaUrl(xml) {
-  const hit=xml.match(/<(?:media:thumbnail|media:content|enclosure)\b[^>]*>/i);
-  return hit?attr(hit[0],'url'):'';
+  for(const hit of xml.matchAll(/<(?:media:thumbnail|media:content|enclosure)\b[^>]*>/gi)){
+    const tag=hit[0],type=attr(tag,'type'),medium=attr(tag,'medium');
+    if(type&&!/^image\//i.test(type))continue;
+    if(medium&&medium.toLowerCase()!=='image')continue;
+    const url=attr(tag,'url');
+    if(url)return url;
+  }
+  return '';
 }
 export function parseFeed(xml,source) {
   const blocks=[...String(xml).matchAll(/<(item|entry)(?:\s[^>]*)?>([\s\S]*?)<\/\1>/gi)].slice(0,MAX_ITEMS_PER_FEED);

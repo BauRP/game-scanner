@@ -1,37 +1,61 @@
+import {findArticleImage} from './images.js';
+import {coverPngBytes} from './cover.js';
 export function composePost(draft,article){
-  const headline=String(draft.headline||article.title).trim().slice(0,90);
-  const body=String(draft.body||'').trim().slice(0,520);
-  const source=String(article.source).replace(/[\r\n]/g,'').slice(0,50);
-  // Plain text prevents HTML/Markdown injection from RSS content.
-  return ('🎮 '+headline+'\n\n'+body+'\n\nИсточник: '+source+'\n'+article.url).slice(0,1000);
+  const headline=String(draft.headline||'').replace(/[\r\n]/g,' ').trim().slice(0,85);
+  const body=String(draft.body||'').replace(/[\r\n]/g,' ').trim().slice(0,420);
+  const source=String(article.source||'').replace(/[\r\n]/g,' ').trim().slice(0,50);
+  const url=String(article.url||'');
+  if(!headline||!body||!source||!/^https:\/\//.test(url)||url.length>450)throw new Error('Telegram caption lacks verifiable source');
+  const ending='\n\nИсточник: '+source+'\n'+url;
+  const intro='🎮 '+headline+'\n\n';
+  const maxBody=Math.min(420,1024-intro.length-ending.length);
+  if(maxBody<35)throw new Error('Article link leaves no room for a caption');
+  return intro+body.slice(0,maxBody)+ending;
 }
-export async function telegramCall(token,method,data,fetchFn=fetch){
+export class TelegramApiError extends Error{
+  constructor(method,status,description){
+    super('Telegram '+method+' HTTP '+status+': '+String(description||'Unknown error').slice(0,160));
+    this.name='TelegramApiError';this.status=status;
+  }
+}
+async function callApi(token,method,options,fetchFn){
   const r=await fetchFn('https://api.telegram.org/bot'+token+'/'+method,{
-    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),
-    signal:AbortSignal.timeout(12000)
+    method:'POST',...options,signal:AbortSignal.timeout(12000)
   });
   const payload=await r.json().catch(()=>({}));
-  if(!r.ok||!payload.ok)throw new Error('Telegram '+method+' HTTP '+r.status+': '+String(payload.description||'Unknown error').slice(0,160));
+  if(!r.ok||!payload.ok)throw new TelegramApiError(method,r.status,payload.description);
+  if(!payload.result?.message_id)throw new Error('Telegram did not return message_id; delivery is uncertain');
   return payload.result;
 }
+export async function telegramCall(token,method,data,fetchFn=fetch){
+  return callApi(token,method,{headers:{'Content-Type':'application/json'},body:JSON.stringify(data)},fetchFn);
+}
+export async function sendCoverPhoto(caption,env,fetchFn=fetch){
+  const data=new FormData();
+  data.append('chat_id',env.TELEGRAM_CHAT_ID);
+  data.append('caption',caption);
+  data.append('photo',new Blob([coverPngBytes()],{type:'image/png'}),'game-scanner.png');
+  const r=await callApi(env.TELEGRAM_BOT_TOKEN,'sendPhoto',{body:data},fetchFn);
+  return r.message_id;
+}
 export async function publishPost(draft,article,env,fetchFn=fetch){
-  const chat_id=env.TELEGRAM_CHAT_ID;
-  const text=composePost(draft,article);
-  if(env.DEFAULT_PHOTO_FILE_ID){
-    const r=await telegramCall(env.TELEGRAM_BOT_TOKEN,'sendPhoto',{chat_id,photo:env.DEFAULT_PHOTO_FILE_ID,caption:text},fetchFn);
-    return r?.message_id;
-  }
-  if(env.USE_SOURCE_IMAGES==='true'&&article.image){
-    // Only opt in after verifying publisher allows republishing its images.
-    const permittedHost=new URL(article.url).hostname;
-    let image=null;
-    try{image=new URL(article.image);}catch{}
-    if(image?.protocol==='https:'&&image.hostname===permittedHost){
-      const r=await telegramCall(env.TELEGRAM_BOT_TOKEN,'sendPhoto',{chat_id,photo:image.href,caption:text},fetchFn);
-      return r?.message_id;
+  const caption=composePost(draft,article);
+  // Publisher photos may be copyrighted: permission must be considered by channel owner.
+  if(env.USE_SOURCE_IMAGES==='true'){
+    const image=await findArticleImage(article,fetchFn);
+    if(image){
+      try{
+        const sent=await telegramCall(env.TELEGRAM_BOT_TOKEN,'sendPhoto',{
+          chat_id:env.TELEGRAM_CHAT_ID,photo:image.url,caption
+        },fetchFn);
+        return sent.message_id;
+      }catch(e){
+        // HTTP 400 proves the image was rejected and not published.
+        // Unknown network/5xx failures are NEVER retried to avoid duplicate posts.
+        if(!(e instanceof TelegramApiError&&e.status===400))throw e;
+        console.warn('Source image rejected; using original Game Scanner cover');
+      }
     }
   }
-  // Link previews can contain the original article image; no illegal rehosting.
-  const r=await telegramCall(env.TELEGRAM_BOT_TOKEN,'sendMessage',{chat_id,text,link_preview_options:{is_disabled:false}},fetchFn);
-  return r?.message_id;
+  return sendCoverPhoto(caption,env,fetchFn);
 }

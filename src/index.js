@@ -125,7 +125,7 @@ export default {
       }
       return Response.json({ok:true,service:'game-scanner',publishing:env.PUBLISH_ENABLED==='true',
         telegramConfigured:Boolean(env.TELEGRAM_BOT_TOKEN&&env.TELEGRAM_CHAT_ID),storageConfigured:Boolean(env.DB),
-        testStatus},{headers:{'Cache-Control':'no-store'}});
+        testStatus,primaryModel:env.AI_MODEL||'@cf/openai/gpt-oss-20b',backupModel:env.AI_BACKUP_MODEL||'@cf/google/gemma-4-26b-a4b-it',sourceImages:env.USE_SOURCE_IMAGES==='true'},{headers:{'Cache-Control':'no-store'}});
     }
     if(request.method==='POST'&&url.pathname==='/run'){
       if(!env.ADMIN_KEY||request.headers.get('Authorization')!=='Bearer '+env.ADMIN_KEY)return new Response('Unauthorized',{status:401});

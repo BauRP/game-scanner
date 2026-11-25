@@ -13,7 +13,8 @@
     "MAX_POSTS_PER_DAY": "8",
     "MAX_ARTICLE_AGE_HOURS": "72",
     "AI_MODEL": "@cf/openai/gpt-oss-20b",
+    "AI_BACKUP_MODEL": "@cf/google/gemma-4-26b-a4b-it",
     "KZ_UTC_OFFSET_HOURS": "5",
-    "USE_SOURCE_IMAGES": "false"
+    "USE_SOURCE_IMAGES": "true"
   }
 }
