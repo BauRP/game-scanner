@@ -22,10 +22,13 @@ export async function runCycle(env,deps={}){
   if(await publishedCount(env.DB,day)>=max)return {status:'daily_limit',day};
   const {articles,errors,feedStats=[]}=await (deps.fetchNews||fetchNews)(deps.fetchFn||fetch,now,intVal(env.MAX_ARTICLE_AGE_HOURS,72,1,168));
   const checks=[],quality=await readQuality(env.DB);
+  let draftsTried=0;
   try{
   for await(const selection of photoCandidates(articles,{fetchFn:deps.fetchFn||fetch,findImage:deps.findArticleImage,wasAttempted:url=>alreadyAttempted(env.DB,url),useImages:env.USE_SOURCE_IMAGES==='true',quality,checks})){
     const {article:item,editorial}=selection;
+    if(draftsTried>=2)break;
     if(!await claim(env.DB,item,day,now))continue;
+    draftsTried++;
     let draft;
     try{
       draft=await (deps.writePost||writePost)(item,env,deps.fetchFn||fetch,editorial);
@@ -42,7 +45,7 @@ export async function runCycle(env,deps={}){
     try{
       const messageId=await (deps.publishPost||publishPost)(draft,item,env,deps.fetchFn||fetch,selection);
       await markSent(env.DB,item.url,messageId);
-      return {status:'sent',source:item.source,engine:draft.engine,category:editorial.category,day};
+      return {status:'sent',source:item.source,engine:draft.engine,category:editorial.category,imageMode:selection.check?.accepted===true?'publisher':'game-scanner-cover',day};
     }catch(e){
       // Never auto retry ambiguous Telegram delivery, which can cause duplicates.
       await markFailed(env.DB,item.url);
@@ -148,7 +151,7 @@ export default {
       }
       return Response.json({ok:true,service:'game-scanner',publishing:env.PUBLISH_ENABLED==='true',
         telegramConfigured:Boolean(env.TELEGRAM_BOT_TOKEN&&env.TELEGRAM_CHAT_ID),storageConfigured:Boolean(env.DB),
-        testStatus,commissioning:env.COMMISSION_ONCE==='true',imagePipelineVersion:'original-photo-v2',aiDiagnosticsVersion:2,primaryModel:env.AI_MODEL||'@cf/openai/gpt-oss-20b',backupModel:env.AI_BACKUP_MODEL||'@cf/google/gemma-4-26b-a4b-it',sourceImages:env.USE_SOURCE_IMAGES==='true'},{headers:{'Cache-Control':'no-store'}});
+        testStatus,commissioning:env.COMMISSION_ONCE==='true',imagePipelineVersion:'original-photo-v2',aiDiagnosticsVersion:2,primaryModel:env.AI_MODEL||'@cf/openai/gpt-oss-20b',backupModel:env.AI_BACKUP_MODEL||'@cf/google/gemma-4-26b-a4b-it',sourceImages:env.USE_SOURCE_IMAGES==='true',sourceExpansionVersion:1},{headers:{'Cache-Control':'no-store'}});
     }
     if(request.method==='POST'&&url.pathname==='/run'){
       if(!env.ADMIN_KEY||request.headers.get('Authorization')!=='Bearer '+env.ADMIN_KEY)return new Response('Unauthorized',{status:401});
