@@ -4,7 +4,7 @@ import {writePost,BACKUP_MODEL,PRIMARY_MODEL,modelError} from './ai.js';
 import {findArticleImage} from './images.js';
 import {enrichArticle} from './news.js';
 import {sendPublisherPhoto} from './telegram.js';
-import {initialize,dayKey,alreadyAttempted,claim,markSent,markFailed} from './storage.js';
+import {initialize,dayKey,alreadyAttempted,claim,markSent,markFailed,releaseClaim} from './storage.js';
 
 const KEY='original-photo-gemma-20261125';
 const MAX_ATTEMPTS=3;
@@ -31,7 +31,7 @@ export async function commissionOnce(env,deps={}){
   const db=env.DB,fetchFn=deps.fetchFn||fetch,now=deps.now??Date.now();
   await db.prepare(CREATE).run();
   const lock=await db.prepare("INSERT OR IGNORE INTO commissioning(test_key,status,result_json) VALUES (?,'checking',?)").bind(KEY,JSON.stringify({attempt:1,diagnosticsVersion:DIAGNOSTICS_VERSION,startedAt:now})).run();
-  let attempt=1;
+  let attempt=1,owner=JSON.stringify({attempt:1,diagnosticsVersion:DIAGNOSTICS_VERSION,startedAt:now});
   if(Number(lock.meta?.changes||0)!==1){
     const row=await db.prepare('SELECT status,result_json FROM commissioning WHERE test_key=?').bind(KEY).first();
     if(!row)return commissioningStatus(env);
@@ -43,13 +43,18 @@ export async function commissionOnce(env,deps={}){
     attempt=oldFailure||oldChecking?1:previous.diagnosticsVersion===DIAGNOSTICS_VERSION?(Number.isInteger(previous.attempt)&&previous.attempt>0?previous.attempt:1)+1:1;
     if(attempt>MAX_ATTEMPTS)return commissioningStatus(env);
     // Atomic compare-and-set: only one worker can resume a pre-delivery failure.
+    owner=JSON.stringify({attempt,diagnosticsVersion:DIAGNOSTICS_VERSION,startedAt:now});
     const retry=await db.prepare("UPDATE commissioning SET status='checking',result_json=? WHERE test_key=? AND status=? AND result_json IS ?")
-      .bind(JSON.stringify({attempt,diagnosticsVersion:DIAGNOSTICS_VERSION,startedAt:now}),KEY,row.status,row.result_json).run();
+      .bind(owner,KEY,row.status,row.result_json).run();
     if(Number(retry.meta?.changes||0)!==1)return commissioningStatus(env);
   }
+  let ownedStatus='checking';
   const save=async(status,result={})=>{
     const data={...result,startedAt:now,finishedAt:Date.now(),diagnosticsVersion:DIAGNOSTICS_VERSION,attempt,maxAttempts:MAX_ATTEMPTS,retryAvailable:RETRYABLE.has(status)&&attempt<MAX_ATTEMPTS};
-    await db.prepare('UPDATE commissioning SET status=?,result_json=? WHERE test_key=?').bind(status,JSON.stringify(data),KEY).run();
+    const next=JSON.stringify(data);
+    const updated=await db.prepare('UPDATE commissioning SET status=?,result_json=? WHERE test_key=? AND status=? AND result_json IS ?').bind(status,next,KEY,ownedStatus,owner).run();
+    if(Number(updated.meta?.changes||0)!==1)throw Object.assign(Error('Commissioning ownership lost'),{ownershipLost:true});
+    owner=next;ownedStatus=status;
     return {status,...data};
   };
   let claimed=null, gemma=null, diagnostics={};
@@ -96,6 +101,7 @@ export async function commissionOnce(env,deps={}){
     return save('sent',{...gemma,messageId:id});
   }catch(e){
     // A Telegram timeout may mean delivery already occurred. Never retry.
+    if(e?.ownershipLost){if(claimed&&ownedStatus==='checking'){try{await releaseClaim(db,claimed);}catch{}}return commissioningStatus(env);}
     if(claimed){try{await markFailed(db,claimed);}catch{}}
     return save(claimed?'delivery_unconfirmed':'check_failed',gemma||{...diagnostics,backupVerified:false,error:modelError(e,'commissioning')});
   }
