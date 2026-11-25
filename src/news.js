@@ -31,7 +31,7 @@ function attr(xml,name) {
 export function normalizedUrl(value,allowedHosts) {
   try {
     const u=new URL(decodeEntities(value.trim()));
-    if(u.protocol!=='https:'||u.username||u.password||!allowedHosts.includes(u.hostname.toLowerCase()))return '';
+    if(u.protocol!=='https:'||u.username||u.password||u.port||!allowedHosts.includes(u.hostname.toLowerCase()))return '';
     for(const k of [...u.searchParams.keys()])if(/^(utm_|fbclid$|gclid$|ref$)/i.test(k))u.searchParams.delete(k);
     u.hash='';
     return u.href;
@@ -92,15 +92,26 @@ export function rankNews(items,qualityBonus=()=>0,quality={}) {
 }
 export async function fetchNews(fetchFn=fetch,now=Date.now(),maxAgeHours=72) {
   const results=[];
+  let redirects=0;
   for(let i=0;i<FEEDS.length;i+=4)results.push(...await Promise.allSettled(FEEDS.slice(i,i+4).map(async source=>{
-    const res=await fetchFn(source.url,{
+    let url=source.url;
+    const options={redirect:'manual',
       headers:{'Accept':'application/rss+xml, application/atom+xml, application/xml, text/xml','User-Agent':'GameScannerNewsBot/1.0'},
       signal:AbortSignal.timeout(9000)
-    });
+    };
+    let res=await fetchFn(url,options);
+    if([301,302,303,307,308].includes(res.status)){
+      const loc=res.headers.get('location');await res.body?.cancel().catch(()=>{});
+      const next=loc?normalizedUrl(new URL(loc,url).href,[...source.hosts,new URL(source.url).hostname]):'';
+      if(!next||redirects>=6)throw Error('feed redirect unavailable');
+      redirects++;res=await fetchFn(next,options);
+    }
     if(!res.ok)throw new Error(source.name+' HTTP '+res.status);
     const len=Number(res.headers.get('content-length')||0);
-    if(len>MAX_FEED_BYTES)throw new Error(source.name+' feed too large');
-    return parseFeed((await res.text()).slice(0,MAX_FEED_BYTES),source).filter(item=>eligible(item,now,maxAgeHours));
+    if(len>MAX_FEED_BYTES){await res.body?.cancel().catch(()=>{});throw new Error(source.name+' feed too large');}
+    const xml=await articleHtml(res,MAX_FEED_BYTES);
+    if(!/<(?:rss|feed|rdf:RDF)\b/i.test(xml)||/<html\b/i.test(xml.slice(0,1000)))throw Error('invalid RSS or Atom response');
+    return parseFeed(xml,source).filter(item=>eligible(item,now,maxAgeHours));
   })));
   const items=[],errors=[];
   for(let i=0;i<results.length;i++){
@@ -130,14 +141,14 @@ export function extractArticleContext(html){
   }
   return parts.join(' ').slice(0,3200);
 }
-async function articleHtml(response){
+async function articleHtml(response,limit=1000000){
   const reader=response.body?.getReader();
   if(!reader)return '';
   const decoder=new TextDecoder();let size=0,html='';
   try{
-    while(size<1000000){
+    while(size<limit){
       const {done,value}=await reader.read();if(done)break;
-      const chunk=value.subarray(0,1000000-size);size+=chunk.byteLength;
+      const chunk=value.subarray(0,limit-size);size+=chunk.byteLength;
       html+=decoder.decode(chunk,{stream:true});
     }
     return html+decoder.decode();
