@@ -128,14 +128,14 @@ export function needsGameContext(article,editorial={}){
     /\b(now available|out now|launch(?:es|ed)?|release(?:d| date)?|announc(?:es|ed|ement)|unveil(?:s|ed)?|reveal(?:s|ed)?|debut|gameplay trailer|new trailer)\b/i.test(article.title||'');
 }
 export function extractArticleContext(html){
-  const text=String(html).replace(/<(script|style|nav|aside|footer|form|noscript|iframe)\b[^>]*>[\s\S]*?<\/\1>/gi,' ');
+  const text=String(html).replace(/<(script|style|nav|aside|footer|form|noscript|iframe|header)\b[^>]*>[\s\S]*?<\/\1>/gi,' ');
   const main=text.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1]||
     text.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1];
   if(!main)return '';
   const parts=[];
   for(const [,p] of main.matchAll(/<(?:p|li)\b[^>]*>([\s\S]*?)<\/(?:p|li)>/gi)){
     const value=cleanText(p,700);
-    if(value.length<35||/^(?:read more|related|subscribe|advertisement|follow us|sign up|share this|cookie|privacy policy|comments\b)/i.test(value))continue;
+    if(value.length<35||/^(?:read more|related|subscribe|advertisement|follow us|sign up|share this|cookie|privacy policy|comments\b|recommended|you may also like|related articles|affiliate disclosure)/i.test(value))continue;
     if(!parts.includes(value))parts.push(value);
     if(parts.join(' ').length>=3200)break;
   }
