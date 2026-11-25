@@ -45,9 +45,11 @@ export async function publishPost(draft,article,env,fetchFn=fetch){
     const image=await findArticleImage(article,fetchFn);
     if(image){
       try{
-        const sent=await telegramCall(env.TELEGRAM_BOT_TOKEN,'sendPhoto',{
-          chat_id:env.TELEGRAM_CHAT_ID,photo:image.url,caption
-        },fetchFn);
+        const data=new FormData();
+        data.append('chat_id',env.TELEGRAM_CHAT_ID);
+        data.append('caption',caption);
+        data.append('photo',new Blob([image.bytes],{type:image.mime}),image.mime==='image/png'?'news.png':'news.jpg');
+        const sent=await callApi(env.TELEGRAM_BOT_TOKEN,'sendPhoto',{body:data},fetchFn);
         return sent.message_id;
       }catch(e){
         // HTTP 400 proves the image was rejected and not published.
