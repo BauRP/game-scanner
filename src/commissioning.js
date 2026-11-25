@@ -30,7 +30,7 @@ export async function commissionOnce(env,deps={}){
   if(!env.DB||!env.AI||!env.TELEGRAM_BOT_TOKEN||!env.TELEGRAM_CHAT_ID)return {status:'missing_configuration'};
   const db=env.DB,fetchFn=deps.fetchFn||fetch,now=deps.now??Date.now();
   await db.prepare(CREATE).run();
-  const lock=await db.prepare("INSERT OR IGNORE INTO commissioning(test_key,status) VALUES (?,'checking')").bind(KEY).run();
+  const lock=await db.prepare("INSERT OR IGNORE INTO commissioning(test_key,status,result_json) VALUES (?,'checking',?)").bind(KEY,JSON.stringify({attempt:1,diagnosticsVersion:DIAGNOSTICS_VERSION,startedAt:now})).run();
   let attempt=1;
   if(Number(lock.meta?.changes||0)!==1){
     const row=await db.prepare('SELECT status,result_json FROM commissioning WHERE test_key=?').bind(KEY).first();
@@ -47,7 +47,6 @@ export async function commissionOnce(env,deps={}){
       .bind(JSON.stringify({attempt,diagnosticsVersion:DIAGNOSTICS_VERSION,startedAt:now}),KEY,row.status,row.result_json).run();
     if(Number(retry.meta?.changes||0)!==1)return commissioningStatus(env);
   }
-  if(Number(lock.meta?.changes||0)===1)await db.prepare('UPDATE commissioning SET status=?,result_json=? WHERE test_key=?').bind('checking',JSON.stringify({attempt,diagnosticsVersion:DIAGNOSTICS_VERSION,startedAt:now}),KEY).run();
   const save=async(status,result={})=>{
     const data={...result,startedAt:now,finishedAt:Date.now(),diagnosticsVersion:DIAGNOSTICS_VERSION,attempt,maxAttempts:MAX_ATTEMPTS,retryAvailable:RETRYABLE.has(status)&&attempt<MAX_ATTEMPTS};
     await db.prepare('UPDATE commissioning SET status=?,result_json=? WHERE test_key=?').bind(status,JSON.stringify(data),KEY).run();
