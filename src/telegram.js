@@ -1,3 +1,4 @@
+import {requireRussianDraft} from './translator.js';
 import {findArticleImage} from './images.js';
 import {coverPngBytes} from './cover.js';
 export function composePost(draft,article){
@@ -39,6 +40,7 @@ export async function sendCoverPhoto(caption,env,fetchFn=fetch){
   return r.message_id;
 }
 export async function sendPublisherPhoto(draft,article,image,env,fetchFn=fetch){
+  requireRussianDraft(draft);
   if(!image?.bytes?.length||!['image/png','image/jpeg','image/webp'].includes(image.mime))throw new Error('Validated original image required');
   const data=new FormData();
   data.append('chat_id',env.TELEGRAM_CHAT_ID);
@@ -48,6 +50,7 @@ export async function sendPublisherPhoto(draft,article,image,env,fetchFn=fetch){
   return sent.message_id;
 }
 export async function publishPost(draft,article,env,fetchFn=fetch,selection=undefined){
+  requireRussianDraft(draft);
   const caption=composePost(draft,article);
   // Publisher photos may be copyrighted: permission must be considered by channel owner.
   if(env.USE_SOURCE_IMAGES==='true'){
