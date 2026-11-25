@@ -24,6 +24,7 @@ export async function runCycle(env,deps={}){
     if(!commissioned(result))return {status:'commissioning_required'};
   }
   const now=deps.now??Date.now();
+  const clock=deps.clock||Date.now;
   const day=dayKey(now,0); // Cloudflare free allocation resets at 00:00 UTC (05:00 Kazakhstan).
   const max=intVal(env.MAX_POSTS_PER_DAY,24,1,24);
   await initialize(env.DB);
@@ -33,13 +34,17 @@ export async function runCycle(env,deps={}){
   if(usage.quotaExhausted||usage.estimatedNeurons>=9000)return {status:'daily_ai_quota',day};
   const previousTitles=await recentTitleKeys(env.DB,now);
   const recent=await recentCategories(env.DB,now);
-  const {articles,errors=[],feedStats=[]}=await (deps.fetchNews||fetchNews)(deps.fetchFn||fetch,now,intVal(env.MAX_ARTICLE_AGE_HOURS,72,1,168));
+  let news;
+  try{news=await (deps.fetchNews||fetchNews)(deps.fetchFn||fetch,now,intVal(env.MAX_ARTICLE_AGE_HOURS,72,1,168));}catch{await releaseHour(env.DB,now);return {status:'feed_unavailable',day};}
+  const {articles,errors=[],feedStats=[]}=news;
   const checks=[],quality=await readQuality(env.DB);
   let draftsTried=0;
   try{
   for await(const selection of photoCandidates(articles.filter(a=>!previousTitles.has(titleKey(a.title))&&!isSimilarTitle(a.title,previousTitles)),{fetchFn:deps.fetchFn||fetch,findImage:deps.findArticleImage,wasAttempted:url=>alreadyAttempted(env.DB,url),useImages:env.USE_SOURCE_IMAGES==='true',quality,checks,recentCategories:recent})){
     const {article:item,editorial}=selection;
     if(draftsTried>=2)break;
+    // Never start delivery in a different hour from the reservation.
+    if((!deps.now||deps.clock)&&Math.floor(clock()/3600000)!==Math.floor(now/3600000))return {status:'hour_expired',day};
     if(!await claim(env.DB,item,day,now))continue;
     draftsTried++;
     let draft;
@@ -57,6 +62,7 @@ export async function runCycle(env,deps={}){
       if(!quota)await releaseHour(env.DB,now);
       return {status:quota?'daily_ai_quota':'ai_unavailable',day};
     }
+    if((!deps.now||deps.clock)&&Math.floor(clock()/3600000)!==Math.floor(now/3600000)){await releaseClaim(env.DB,item.url);return {status:'hour_expired',day};}
     try{
       const messageId=await (deps.publishPost||publishPost)(draft,item,env,deps.fetchFn||fetch,selection);
       if(!Number.isInteger(messageId)||messageId<=0)throw Error('Missing Telegram message ID');
@@ -115,9 +121,9 @@ export default {
     // Do not replay delayed triggers from an already elapsed hour.
     if(Number.isFinite(event?.scheduledTime)&&Math.floor(event.scheduledTime/3600000)!==Math.floor(now/3600000))return;
     const work=(async()=>{
-      if(retry){const history=await cycleHistory(env.DB);if(!history.available||!history.lastCycle||Math.floor(Date.parse(history.lastCycle.recordedAt)/3600000)!==Math.floor(now/3600000)||!['ai_unavailable','no_fresh_articles'].includes(history.lastCycle.status))return {status:'retry_not_needed'};}
+      if(retry){const history=await cycleHistory(env.DB);if(!history.available||!history.lastCycle||Math.floor(Date.parse(history.lastCycle.recordedAt)/3600000)!==Math.floor(now/3600000)||!['ai_unavailable','feed_unavailable','no_fresh_articles'].includes(history.lastCycle.status))return {status:'retry_not_needed'};}
       if(env.PUBLISH_ENABLED!=='true'&&env.COMMISSION_ONCE==='true')return commissionOnce(env);
-      const result=await runCycle(env,{now});
+      const result=await runCycle(env,{now,clock:Date.now});
       // The owner's launch request is armed, but real news remain gated on the two-model test.
       if(result.status==='commissioning_required'&&env.COMMISSION_ONCE==='true'){
         const state=await commissioningStatus(env);
