@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check src/index.js && node --check src/source-quality.js && node --check src/photo-selection.js && node --check src/sources.js && node --check src/news.js && node --check src/ai.js && node --check src/storage.js && node --check src/telegram.js && node --check src/images.js && node --check src/cover.js && node --check src/preview.js && node --check src/editorial.js && node --check src/commissioning.js && node --check src/usage.js",
+    "check": "node --check src/index.js && node --check src/source-quality.js && node --check src/photo-selection.js && node --check src/sources.js && node --check src/news.js && node --check src/ai.js && node --check src/storage.js && node --check src/telegram.js && node --check src/images.js && node --check src/cover.js && node --check src/preview.js && node --check src/editorial.js && node --check src/commissioning.js && node --check src/usage.js && node --check src/translator.js",
     "test": "node --test",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy"
