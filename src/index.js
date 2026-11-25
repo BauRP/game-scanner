@@ -63,13 +63,33 @@ export async function runOneTimeTest(env, deps = {}) {
 
 export default {
   async scheduled(event,env,ctx){
-    ctx.waitUntil((async()=>{
-      if(env.TEST_MESSAGE_ONCE)console.log('Game Scanner test:',JSON.stringify(await runOneTimeTest(env)));
-      console.log('Game Scanner:',JSON.stringify(await runCycle(env)));
-    })().catch(e=>console.error('Scheduled cycle failed:',String(e?.message||e).slice(0,140))));
+    // Test messages are manual only, never sent by cron.
+    ctx.waitUntil(runCycle(env).then(result=>console.log('Game Scanner:',JSON.stringify(result)))
+      .catch(e=>console.error('Scheduled cycle failed:',String(e?.message||e).slice(0,140))));
   },
   async fetch(request,env){
     const url=new URL(request.url);
+    if(url.pathname==='/test-message'){
+      if(request.method==='POST'){
+        try{
+          const result=await runOneTimeTest(env);
+          const lines={
+            sent:'Успешно: Telegram подтвердил отправку одного тестового сообщения. Проверь канал.',
+            failed:'Ошибка: Telegram не подтвердил отправку. Проверь Worker Logs; повтор блокирован, чтобы избежать дублей.',
+            sending:'Попытка отправки уже началась. Проверь /health.',
+            not_requested:'Тестовая отправка отключена в конфигурации.',
+            missing_configuration:'Ошибка: не хватает TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID или D1.',
+            already_attempted:'Этот тест уже запускался.'
+          };
+          return new Response(lines[result.status]||('Состояние теста: '+result.status),{headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}});
+        }catch(error){
+          console.error('Test request error:',String(error?.message||error).slice(0,180));
+          return new Response('Сбой теста. Открой Worker Logs.',{status:500,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}});
+        }
+      }
+      if(request.method==='GET')return new Response('<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Game Scanner — тест</title><body style="font:18px system-ui;max-width:580px;margin:70px auto;padding:20px"><h1>🎮 Game Scanner</h1><p>Проверка связи с Telegram. Кнопка отправляет одно тестовое сообщение. Автоматические новости остаются выключенными.</p><form method="post" action="/test-message"><button style="font:inherit;padding:14px 20px;cursor:pointer">Отправить один тест</button></form><p><a href="/health">Проверить состояние</a></p></body></html>',{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'}});
+      return new Response('Method Not Allowed',{status:405,headers:{'Allow':'GET, POST'}});
+    }
     if(request.method==='GET'&&url.pathname==='/health'){
       let testStatus = env.TEST_MESSAGE_ONCE ? 'pending' : 'not_requested';
       if(env.TEST_MESSAGE_ONCE && env.DB){
