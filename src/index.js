@@ -2,17 +2,19 @@ import {commissionOnce,commissioningStatus} from './commissioning.js';
 import {photoCandidates} from './photo-selection.js';
 import {readQuality,saveQuality,qualityStatus} from './source-quality.js';
 import {fetchNews} from './news.js';
-import {initialize,dayKey,alreadyAttempted,publishedCount,claim,markSent,markFailed,releaseClaim,reserveHour,recentTitleKeys,titleKey} from './storage.js';
+import {initialize,dayKey,alreadyAttempted,publishedCount,claim,markSent,markFailed,releaseClaim,reserveHour,recentTitleKeys,titleKey,recordCycle,cycleHistory,releaseHour,isSimilarTitle,recentCategories} from './storage.js';
 import {writePost,EditorialSkip} from './ai.js';
 import {previewHtml,previewStatus,createAiPreview,refreshPreviewImage} from './preview.js';
 import {publishPost,telegramCall} from './telegram.js';
 const intVal=(value,fallback,min,max)=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
+const adminAllowed=(request,env)=>Boolean(env.ADMIN_KEY&&request.headers.get('Authorization')==='Bearer '+env.ADMIN_KEY);
+const commissioned=r=>r.status==='sent'&&r.primaryVerified===true&&r.backupVerified===true&&r.imageMode==='publisher'&&Number.isInteger(r.messageId)&&r.messageId>0;
 export async function runCycle(env,deps={}){
   if(env.PUBLISH_ENABLED!=='true')return {status:'disabled'};
   if(!env.DB||!env.TELEGRAM_BOT_TOKEN||!env.TELEGRAM_CHAT_ID)return {status:'missing_configuration'};
   if(env.COMMISSION_ONCE==='true'){
     const result=await commissioningStatus(env);
-    if(result.status!=='sent'||result.primaryVerified!==true||result.backupVerified!==true||result.imageMode!=='publisher'||!Number.isInteger(result.messageId)||result.messageId<=0)return {status:'commissioning_required'};
+    if(!commissioned(result))return {status:'commissioning_required'};
   }
   const now=deps.now??Date.now();
   const day=dayKey(now,0); // Cloudflare free allocation resets at 00:00 UTC (05:00 Kazakhstan).
@@ -21,11 +23,12 @@ export async function runCycle(env,deps={}){
   if(await publishedCount(env.DB,day)>=max)return {status:'daily_limit',day};
   if(!await reserveHour(env.DB,now))return {status:'hour_already_reserved',day};
   const previousTitles=await recentTitleKeys(env.DB,now);
+  const recent=await recentCategories(env.DB,now);
   const {articles,errors=[],feedStats=[]}=await (deps.fetchNews||fetchNews)(deps.fetchFn||fetch,now,intVal(env.MAX_ARTICLE_AGE_HOURS,72,1,168));
   const checks=[],quality=await readQuality(env.DB);
   let draftsTried=0;
   try{
-  for await(const selection of photoCandidates(articles.filter(a=>!previousTitles.has(titleKey(a.title))),{fetchFn:deps.fetchFn||fetch,findImage:deps.findArticleImage,wasAttempted:url=>alreadyAttempted(env.DB,url),useImages:env.USE_SOURCE_IMAGES==='true',quality,checks})){
+  for await(const selection of photoCandidates(articles.filter(a=>!previousTitles.has(titleKey(a.title))&&!isSimilarTitle(a.title,previousTitles)),{fetchFn:deps.fetchFn||fetch,findImage:deps.findArticleImage,wasAttempted:url=>alreadyAttempted(env.DB,url),useImages:env.USE_SOURCE_IMAGES==='true',quality,checks,recentCategories:recent})){
     const {article:item,editorial}=selection;
     if(draftsTried>=2)break;
     if(!await claim(env.DB,item,day,now))continue;
@@ -41,13 +44,15 @@ export async function runCycle(env,deps={}){
       // AI failure happened BEFORE any Telegram request. Safe to release the claim.
       await releaseClaim(env.DB,item.url);
       console.error('AI unavailable; nothing was published:',String(e?.message||e).slice(0,140));
-      return {status:'ai_unavailable',day};
+      const quota=e?.diagnostics?.some(x=>x.reason==='daily_quota');
+      if(!quota)await releaseHour(env.DB,now);
+      return {status:quota?'daily_ai_quota':'ai_unavailable',day};
     }
     try{
       const messageId=await (deps.publishPost||publishPost)(draft,item,env,deps.fetchFn||fetch,selection);
       if(!Number.isInteger(messageId)||messageId<=0)throw Error('Missing Telegram message ID');
       await markSent(env.DB,item.url,messageId);
-      return {status:'sent',source:item.source,engine:draft.engine,category:editorial.category,imageMode:selection.check?.accepted===true?'publisher':'game-scanner-cover',day};
+      return {status:'sent',source:item.source,engine:draft.engine,category:editorial.category,imageMode:selection.check?.accepted===true?'publisher':'game-scanner-cover',messageId,day};
     }catch(e){
       // Never auto retry ambiguous Telegram delivery, which can cause duplicates.
       await markFailed(env.DB,item.url);
@@ -56,6 +61,7 @@ export async function runCycle(env,deps={}){
     }
   }
   if(errors.length)console.warn('Feeds unavailable:',errors.join(' | '));
+  if(!articles.length&&errors.length)await releaseHour(env.DB,now);
   return {status:articles.length?'no_new_articles':'no_fresh_articles',failedFeeds:errors.length,day};
   }finally{await saveQuality(env.DB,feedStats,checks);}
 }
@@ -94,28 +100,34 @@ export default {
   async scheduled(event,env,ctx){
     // Test messages are manual only, never sent by cron.
     // Ignore old cron triggers while the Cloudflare schedule propagates.
-    if(event?.cron&&event.cron!=='0 * * * *')return;
+    const retry=event?.cron==='12 * * * *';
+    if(event?.cron&&event.cron!=='0 * * * *'&&!retry)return;
     const now=Date.now();
     // Do not replay delayed triggers from an already elapsed hour.
     if(Number.isFinite(event?.scheduledTime)&&Math.floor(event.scheduledTime/3600000)!==Math.floor(now/3600000))return;
     const work=(async()=>{
+      if(retry){const history=await cycleHistory(env.DB);if(!history.available||!history.lastCycle||Math.floor(Date.parse(history.lastCycle.recordedAt)/3600000)!==Math.floor(now/3600000)||!['ai_unavailable','no_fresh_articles'].includes(history.lastCycle.status))return {status:'retry_not_needed'};}
       if(env.PUBLISH_ENABLED!=='true'&&env.COMMISSION_ONCE==='true')return commissionOnce(env);
       const result=await runCycle(env,{now});
       // The owner's launch request is armed, but real news remain gated on the two-model test.
       if(result.status==='commissioning_required'&&env.COMMISSION_ONCE==='true'){
         const state=await commissioningStatus(env);
-        if(['sent','sending','delivery_unconfirmed','checking'].includes(state.status)||state.retryAvailable===false)return result;
+        if(['sent','sending','delivery_unconfirmed'].includes(state.status))return result;
+        if(state.status==='checking'&&!state.recoveryAvailable)return result;
+        if(state.retryAvailable===false&&!state.recoveryAvailable)return result;
         if(!env.AI||env.USE_SOURCE_IMAGES!=='true')return {status:'missing_configuration'};
         if(!await reserveHour(env.DB,now))return {status:'hour_already_reserved'};
         return commissionOnce({...env,PUBLISH_ENABLED:'false'},{now});
       }
       return result;
     })();
-    ctx.waitUntil(work.then(result=>console.log('Game Scanner:',JSON.stringify(result)))
-      .catch(e=>console.error('Scheduled cycle failed:',String(e?.message||e).slice(0,140))));
+    ctx.waitUntil(work.then(async result=>{if(result.status!=='retry_not_needed')await recordCycle(env.DB,now,result);console.log('Game Scanner:',JSON.stringify(result));})
+      .catch(async e=>{await recordCycle(env.DB,now,{status:'cycle_error'});console.error('Scheduled cycle failed:',String(e?.message||e).slice(0,140));}));
   },
   async fetch(request,env){
     const url=new URL(request.url);
+    if(request.method==='POST'&&['/ai-preview','/ai-preview-image','/test-message'].includes(url.pathname)&&!adminAllowed(request,env))return new Response('Unauthorized',{status:401});
+    if(url.pathname==='/publication-status'&&request.method==='GET')return Response.json(await cycleHistory(env.DB),{headers:{'Cache-Control':'no-store'}});
     if(url.pathname==='/source-quality'&&request.method==='GET')return Response.json(await qualityStatus(env.DB),{headers:{'Cache-Control':'no-store'}});
     if(url.pathname==='/commissioning-status'&&request.method==='GET'){
       return Response.json(await commissioningStatus(env),{headers:{'Cache-Control':'no-store'}});
@@ -166,13 +178,16 @@ export default {
           if(row?.status)testStatus=row.status;
         }catch{ /* The test table may not exist before the first scheduled event. */ }
       }
-      return Response.json({ok:true,service:'game-scanner',publishing:env.PUBLISH_ENABLED==='true',
+      const state=await commissioningStatus(env),history=await cycleHistory(env.DB);
+      const requested=env.PUBLISH_ENABLED==='true';
+      const ready=requested&&Boolean(env.DB&&env.AI&&env.TELEGRAM_BOT_TOKEN&&env.TELEGRAM_CHAT_ID)&&(env.COMMISSION_ONCE!=='true'||commissioned(state));
+      return Response.json({ok:true,service:'game-scanner',publishing:requested,readyToPublish:ready,commissioningState:state.status,history,
         telegramConfigured:Boolean(env.TELEGRAM_BOT_TOKEN&&env.TELEGRAM_CHAT_ID),storageConfigured:Boolean(env.DB),
         testStatus,commissioning:env.COMMISSION_ONCE==='true',imagePipelineVersion:'original-photo-v2',aiDiagnosticsVersion:2,primaryModel:env.AI_MODEL||'@cf/openai/gpt-oss-20b',backupModel:env.AI_BACKUP_MODEL||'@cf/google/gemma-4-26b-a4b-it',sourceImages:env.USE_SOURCE_IMAGES==='true',sourceExpansionVersion:1,publicationIntervalMinutes:60,maxPostsPerDay:intVal(env.MAX_POSTS_PER_DAY,24,1,24),quotaResetUtc:'00:00'},{headers:{'Cache-Control':'no-store'}});
     }
     if(request.method==='POST'&&url.pathname==='/run'){
       if(!env.ADMIN_KEY||request.headers.get('Authorization')!=='Bearer '+env.ADMIN_KEY)return new Response('Unauthorized',{status:401});
-      try{return Response.json(await runCycle(env));}
+      try{const now=Date.now(),result=await runCycle(env,{now});await recordCycle(env.DB,now,result);return Response.json(result);}
       catch(e){console.error('Manual run failed:',String(e?.message||e).slice(0,140));return Response.json({error:'Run failed; check Worker logs'},{status:500});}
     }
     return new Response('Not found',{status:404});
