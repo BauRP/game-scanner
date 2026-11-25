@@ -57,7 +57,7 @@ function mediaUrls(xml) {
   }
   return urls;
 }
-export function parseFeed(xml,source) {
+export function parseFeed(xml,source,now=null,maxAgeHours=72) {
   const blocks=[];for(const hit of String(xml).matchAll(/<(item|entry)(?:\s[^>]*)?>([\s\S]*?)<\/\1>/gi)){blocks.push(hit);if(blocks.length>=MAX_ITEMS_PER_FEED)break;}
   return blocks.map(([, ,block])=>{
     const title=cleanText(tag(block,'title'),160);
@@ -65,6 +65,7 @@ export function parseFeed(xml,source) {
     const description=cleanText(tag(block,'description')||tag(block,'summary')||tag(block,'content:encoded'),540);
     const rawDate=cleanText(tag(block,'pubDate')||tag(block,'published')||tag(block,'updated'),80);
     const publishedAt=Date.parse(rawDate);
+    if(!url||title.length<=8||!Number.isFinite(publishedAt)||(now!==null&&!eligible({title,publishedAt},now,maxAgeHours)))return null;
     const feedContext=cleanText(tag(block,'content:encoded')||tag(block,'content')||tag(block,'description')||tag(block,'summary'),3200);
     const article={title,url,description,feedContext,publishedAt,source:source.name};
     const candidates=mediaUrls(block).map(u=>trustedImageUrl(u,article)).filter(Boolean);
@@ -74,7 +75,7 @@ export function parseFeed(xml,source) {
     }
     const imageCandidates=[...new Set(candidates)].slice(0,12);
     return {...article,image:imageCandidates[0]||'',imageCandidates};
-  }).filter(item=>item.title.length>8&&item.url&&Number.isFinite(item.publishedAt));
+  }).filter(Boolean);
 }
 export function eligible(item,now,maxAgeHours=72) {
   const age=now-item.publishedAt;
@@ -112,7 +113,7 @@ export async function fetchNews(fetchFn=fetch,now=Date.now(),maxAgeHours=72) {
     if(len>MAX_FEED_BYTES){await res.body?.cancel().catch(()=>{});throw new Error(source.name+' feed too large');}
     const xml=await articleHtml(res,MAX_FEED_BYTES);
     if(!/<(?:rss|feed|rdf:RDF)\b/i.test(xml)||/<html\b/i.test(xml.slice(0,1000)))throw Error('invalid RSS or Atom response');
-    return parseFeed(xml,source).filter(item=>eligible(item,now,maxAgeHours));
+    return parseFeed(xml,source,now,maxAgeHours);
   })));
   const items=[],errors=[];
   for(let i=0;i<results.length;i++){
