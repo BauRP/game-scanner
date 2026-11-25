@@ -76,8 +76,8 @@ test('RSS article URL cannot be used as a Telegram photo',async()=>{
 });
 test('company names must be grounded in the source',()=>{
  const a={...item,title:'Bandai Card Games announces Digimon Alysion',description:'Bandai Card Games announced the mobile card game.'};
- assert.throws(()=>parseDraft({response:'{"headline":"Digimon Alysion","body":"Компания Bandai Namco сообщила о запуске."}'},a),EditorialSkip);
- assert.doesNotThrow(()=>parseDraft({response:'{"headline":"Digimon Alysion","body":"Компания Bandai Card Games сообщила о запуске."}'},a));
+ assert.throws(()=>parseDraft({response:'{"headline":"Анонс Digimon Alysion","body":"Компания Bandai Namco сообщила о запуске."}'},a),EditorialSkip);
+ assert.doesNotThrow(()=>parseDraft({response:'{"headline":"Анонс Digimon Alysion","body":"Компания Bandai Card Games сообщила о запуске."}'},a));
 });
 
 test('RSS description and encoded content contribute article image candidates',()=>{
