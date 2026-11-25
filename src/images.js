@@ -1,16 +1,5 @@
 // Media links come only from configured publishers, never search engines or user input.
-const PUBLISHER_HOSTS = Object.freeze({
-  Gematsu: ['gematsu.com'],
-  'PlayStation Blog': ['playstation.com'],
-  'PC Gamer': ['pcgamer.com'],
-  'Video Games Chronicle': ['videogameschronicle.com']
-});
-const MEDIA_HOSTS = Object.freeze({
-  Gematsu: ['gematsu.com'],
-  'PlayStation Blog': ['playstation.com'],
-  'PC Gamer': ['pcgamer.com','futurecdn.net'],
-  'Video Games Chronicle': ['videogameschronicle.com','gnwcdn.com']
-});
+import {sourceByName} from './sources.js';
 const allowed = (host,domain)=>host===domain||host.endsWith('.'+domain);
 export function trustedImageUrl(value,article){
   if(typeof value!=='string'||value.length>2048)return null;
@@ -19,8 +8,8 @@ export function trustedImageUrl(value,article){
   if(image.protocol!=='https:'||image.username||image.password||image.port||
     image.hostname.includes(':')||/^\d+(?:\.\d+){3}$/.test(image.hostname)||
     /(?:^|\.)localhost$|(?:^|\.)local$|(?:^|\.)internal$/i.test(image.hostname))return null;
-  if(story.protocol!=='https:'||!PUBLISHER_HOSTS[article.source]?.some(d=>allowed(story.hostname,d)))return null;
-  if(!MEDIA_HOSTS[article.source]?.some(d=>allowed(image.hostname,d)))return null;
+  if(story.protocol!=='https:'||!sourceByName(article.source)?.hosts.includes(story.hostname))return null;
+  if(!sourceByName(article.source)?.media.some(d=>allowed(image.hostname,d)))return null;
   // An RSS enclosure can accidentally point to the article itself, which is HTML,
   // not a photo. Never submit the article URL to Telegram sendPhoto.
   if(image.origin===story.origin&&image.pathname.replace(/\/$/,'')===story.pathname.replace(/\/$/,''))return null;
@@ -123,7 +112,7 @@ async function readLimited(res,maxBytes,prefixOnly=false){
 function storyUrl(value,article){
   try{
     const u=new URL(value,article.url);
-    return u.protocol==='https:'&&!u.username&&!u.password&&!u.port&&PUBLISHER_HOSTS[article.source]?.some(d=>allowed(u.hostname,d))?u.href:null;
+    return u.protocol==='https:'&&!u.username&&!u.password&&!u.port&&sourceByName(article.source)?.hosts.includes(u.hostname)?u.href:null;
   }catch{return null;}
 }
 async function boundedFetch(url,article,fetchFn,isImage,deadline){
