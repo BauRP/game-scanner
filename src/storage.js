@@ -44,7 +44,7 @@ export function titleKey(title){
   return value.length>=20&&value.split(' ').length>=4?value:'';
 }
 export async function recentTitleKeys(db,now){
-  const result=await db.prepare("SELECT title FROM posts WHERE created_at >= ? AND status IN ('sent','processing','failed') ORDER BY created_at DESC LIMIT 100").bind(new Date(now-72*3600000).toISOString()).all();
+  const result=await db.prepare("SELECT title FROM posts WHERE created_at >= ? AND status IN ('sent','processing','failed') ORDER BY created_at DESC LIMIT 180").bind(new Date(now-72*3600000).toISOString()).all();
   return new Set((result.results||[]).map(r=>titleKey(r.title)).filter(Boolean));
 }
 
@@ -59,9 +59,9 @@ export async function recordCycle(db,now,result){
 export async function cycleHistory(db){
  if(!db)return {available:false};
  try{
- const row=await db.prepare("SELECT recorded_at,result_json FROM cycle_history ORDER BY hour_key DESC LIMIT 1").first();
+ const row=await db.prepare("SELECT hour_key,recorded_at,result_json FROM cycle_history ORDER BY hour_key DESC LIMIT 1").first();
  const sent=await db.prepare("SELECT created_at,telegram_message_id FROM posts WHERE status='sent' ORDER BY created_at DESC LIMIT 1").first();
- return {available:true,lastCycle:row?{recordedAt:row.recorded_at,...JSON.parse(row.result_json)}:null,lastPublication:sent?{createdAt:sent.created_at,messageId:sent.telegram_message_id}:null};
+ return {available:true,lastCycle:row?{hourKey:row.hour_key,recordedAt:row.recorded_at,...JSON.parse(row.result_json)}:null,lastPublication:sent?{createdAt:sent.created_at,messageId:sent.telegram_message_id}:null};
  }catch{return {available:false};}
 }
 
@@ -73,18 +73,19 @@ const STOP=new Set(['the','and','for','with','from','this','that','its','new','g
 export function prepareTitleIndex(previous){
  const words=x=>new Set(x.split(' ').filter(w=>w.length>2&&!STOP.has(w)));
  const numbers=x=>(x.match(/\d+(?:[.,]\d+)?/g)||[]).join(',');
- return [...previous].map(key=>({words:words(key),numbers:numbers(key)})).filter(x=>x.words.size>=4);
+ const index=new Map();
+ for(const key of previous){const w=words(key);if(w.size<4)continue;const n=numbers(key);if(!index.has(n))index.set(n,[]);index.get(n).push(w);}
+ return index;
 }
 export function isSimilarTitle(title,previous){
  const key=titleKey(title);if(!key)return false;
  const words=x=>new Set(x.split(' ').filter(w=>w.length>2&&!STOP.has(w)));
  const a=words(key);if(a.size<4)return false;
  const numbers=x=>(x.match(/\d+(?:[.,]\d+)?/g)||[]).join(',');
- const index=Array.isArray(previous)?previous:prepareTitleIndex(previous);
+ const index=previous instanceof Map?previous:prepareTitleIndex(previous);
  const num=numbers(key);
- for(const other of index){
-   if(num!==other.numbers)continue;
-   const b=other.words;
+ for(const b of index.get(num)||[]){
+   if(Math.min(a.size,b.size)/Math.max(a.size,b.size)<0.84)continue;
    const shared=[...a].filter(x=>b.has(x)).length;
    if(shared>=4&&shared/(a.size+b.size-shared)>=0.84)return true;
  }
