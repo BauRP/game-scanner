@@ -26,3 +26,20 @@ export async function markFailed(db,url){
   // Keep failed claim: retries after an ambiguous Telegram delivery can duplicate posts.
   await db.prepare("UPDATE posts SET status = 'failed' WHERE url = ? AND status = 'processing'").bind(url).run();
 }
+
+export const hourKey=now=>new Date(now).toISOString().slice(0,13);
+export async function reserveHour(db,now){
+  await db.prepare("CREATE TABLE IF NOT EXISTS publication_hours (hour_key TEXT PRIMARY KEY, created_at TEXT NOT NULL)").run();
+  const key=hourKey(now);
+  // A single immutable reservation prevents duplicate cron/manual delivery, including ambiguous failures.
+  const result=await db.prepare("INSERT OR IGNORE INTO publication_hours(hour_key,created_at) VALUES (?,?)").bind(key,new Date(now).toISOString()).run();
+  return Number(result?.meta?.changes||0)===1;
+}
+export function titleKey(title){
+  const value=String(title||'').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+  return value.length>=20&&value.split(' ').length>=4?value:'';
+}
+export async function recentTitleKeys(db,now){
+  const result=await db.prepare("SELECT title FROM posts WHERE created_at >= ? AND status IN ('sent','processing','failed') ORDER BY created_at DESC LIMIT 100").bind(new Date(now-72*3600000).toISOString()).all();
+  return new Set((result.results||[]).map(r=>titleKey(r.title)).filter(Boolean));
+}
