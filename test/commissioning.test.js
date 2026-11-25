@@ -23,9 +23,10 @@ function database(initial=null){
          record={status:'checking',result_json:args[0]};changes=1;
        }
      }else if(sql.startsWith('UPDATE commissioning')){
-       record={status:args[0],result_json:args[1]};changes=1;
+       if(args.length<5||(record?.status===args[3]&&record.result_json===args[4])){record={status:args[0],result_json:args[1]};changes=1;}
      }else if(sql.startsWith('INSERT OR IGNORE INTO posts')){
        if(!posts.has(args[0])){posts.set(args[0],{status:'processing'});changes=1;}
+     }else if(sql.startsWith('DELETE FROM posts')){changes=Number(posts.delete(args[0]));
      }else if(sql.startsWith('UPDATE posts SET status')){
        const url=args.at(-1);posts.set(url,{status:sql.includes("'sent'")?'sent':'failed'});changes=1;
      }else throw Error('Unexpected query: '+sql);
