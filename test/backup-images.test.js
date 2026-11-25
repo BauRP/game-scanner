@@ -36,9 +36,9 @@ test('publisher media URL must be trusted',()=>{
 test('original Game Scanner cover is PNG',()=>{
  assert.deepEqual([...coverPngBytes().slice(0,8)],[137,80,78,71,13,10,26,10]);
 });
-test('Telegram caption includes source link and fits media limit',()=>{
+test('Telegram caption excludes public source link and fits media limit',()=>{
  const s=composePost(JSON.parse(good.response),item);
- assert.ok(s.endsWith(item.url));assert.ok(s.length<=1024);
+ assert.ok(!s.includes(item.url));assert.ok(!s.includes('Источник:'));assert.ok(s.length<=1024);
 });
 test('publisher image is attached using sendPhoto',async()=>{
  const calls=[];const f=async(url,opt)=>{if(url===item.image)return photo();calls.push({url,opt});return Response.json({ok:true,result:{message_id:7}});};
