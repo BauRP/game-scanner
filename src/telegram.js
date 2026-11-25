@@ -38,6 +38,15 @@ export async function sendCoverPhoto(caption,env,fetchFn=fetch){
   const r=await callApi(env.TELEGRAM_BOT_TOKEN,'sendPhoto',{body:data},fetchFn);
   return r.message_id;
 }
+export async function sendPublisherPhoto(draft,article,image,env,fetchFn=fetch){
+  if(!image?.bytes?.length||!['image/png','image/jpeg'].includes(image.mime))throw new Error('Validated original image required');
+  const data=new FormData();
+  data.append('chat_id',env.TELEGRAM_CHAT_ID);
+  data.append('caption',composePost(draft,article));
+  data.append('photo',new Blob([image.bytes],{type:image.mime}),image.mime==='image/png'?'news.png':'news.jpg');
+  const sent=await callApi(env.TELEGRAM_BOT_TOKEN,'sendPhoto',{body:data},fetchFn);
+  return sent.message_id;
+}
 export async function publishPost(draft,article,env,fetchFn=fetch){
   const caption=composePost(draft,article);
   // Publisher photos may be copyrighted: permission must be considered by channel owner.
@@ -45,12 +54,7 @@ export async function publishPost(draft,article,env,fetchFn=fetch){
     const image=await findArticleImage(article,fetchFn);
     if(image){
       try{
-        const data=new FormData();
-        data.append('chat_id',env.TELEGRAM_CHAT_ID);
-        data.append('caption',caption);
-        data.append('photo',new Blob([image.bytes],{type:image.mime}),image.mime==='image/png'?'news.png':'news.jpg');
-        const sent=await callApi(env.TELEGRAM_BOT_TOKEN,'sendPhoto',{body:data},fetchFn);
-        return sent.message_id;
+        return await sendPublisherPhoto(draft,article,image,env,fetchFn);
       }catch(e){
         // HTTP 400 proves the image was rejected and not published.
         // Unknown network/5xx failures are NEVER retried to avoid duplicate posts.
