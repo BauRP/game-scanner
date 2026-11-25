@@ -76,6 +76,8 @@ export function verifyDraft(draft,article,editorial={}){
     const n=m[1].replace(',','.');
     if(![...evidence.matchAll(/(\d+(?:[.,]\d+)?)\s*(?:%|percent\b)/gi)].some(x=>x[1].replace(',','.')===n))throw new EditorialSkip('unsupported_percentage');
   }
+  const units=[[/\b(\d+)\s*(?:fps|кадр(?:ов|а)?\s*\/\s*с)/giu,/(\d+)\s*(?:fps|frames per second)\b/gi,'unsupported_fps'],[/(\d+)\s*(?:gb|гб|гигабайт(?:а|ов)?)(?![\p{L}])/giu,/(\d+)\s*(?:gb|gigabytes?)\b/gi,'unsupported_memory']];
+  for(const [out,src,reason] of units){const values=new Set([...evidence.matchAll(src)].map(m=>m[1]));for(const m of produced.matchAll(out))if(!values.has(m[1]))throw new EditorialSkip(reason);}
   const platforms=[[/\bPS5\b|PlayStation 5/gi,/\bPS5\b|PlayStation 5/i],[/\bPS4\b|PlayStation 4/gi,/\bPS4\b|PlayStation 4/i],[/\bXbox Series\b/gi,/\bXbox Series\b/i],[/\bNintendo Switch\b/gi,/\bNintendo Switch\b/i]];
   for(const [out,src] of platforms)if(produced.match(out)&&!src.test(evidence))throw new EditorialSkip('unsupported_platform');
   for(const num of numbers(produced))if(!inputNums.has(num))throw new EditorialSkip('generated_unsupported_number');
@@ -86,7 +88,7 @@ export function verifyDraft(draft,article,editorial={}){
     if(!evidence.toLowerCase().includes(m[1].toLowerCase()))throw new EditorialSkip('company_not_in_source');
   }
   if(/\b(?:rumor|rumour) (?:is |was )?(?:false|debunked)|\b(?:denied|debunked|refuted) (?:the |a )?(?:rumor|rumour|report|leak)\b/i.test(evidence)&&!/(?:опроверг|отрица|не подтверд|ложн|неверн)/i.test(produced))throw new EditorialSkip('denial_missing');
-  if(editorial.rumor&&!/по (?:сообщени|данным)|предположительно|слух|неподтвержд|возможно/i.test(produced))
+  if(editorial.rumor&&!/по (?:сообщени|данным)|предположительно|слух|неподтвержд|возможно|опроверг|отрица/i.test(produced))
     throw new EditorialSkip('rumor_presented_as_fact');
   return draft;
 }
