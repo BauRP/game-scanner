@@ -10,12 +10,17 @@ const KEY='original-photo-gemma-20261125';
 const MAX_ATTEMPTS=3;
 const DIAGNOSTICS_VERSION=2;
 const RETRYABLE=new Set(['no_original_image','backup_not_verified','check_failed','article_already_claimed']);
+const RECOVERY_MS=30*60000;
 const CREATE="CREATE TABLE IF NOT EXISTS commissioning (test_key TEXT PRIMARY KEY,status TEXT NOT NULL, result_json TEXT)";
 export async function commissioningStatus(env){
   if(!env.DB)return {status:'missing_database'};
   try{
     const row=await env.DB.prepare('SELECT status,result_json FROM commissioning WHERE test_key=?').bind(KEY).first();
-    return row?{status:row.status,...(row.result_json?JSON.parse(row.result_json):{})}:{status:'pending'};
+    if(!row)return {status:'pending'};
+    const data=row.result_json?JSON.parse(row.result_json):{};
+    const oldChecking=row.status==='checking'&&Number.isFinite(data.startedAt)&&Date.now()-data.startedAt>=RECOVERY_MS;
+    const oldFailure=RETRYABLE.has(row.status)&&data.retryAvailable===false&&Number.isFinite(data.finishedAt)&&Date.now()-data.finishedAt>=6*3600000;
+    return {status:row.status,...data,recoveryAvailable:oldChecking||oldFailure};
   }catch{return {status:'pending'};}
 }
 export async function commissionOnce(env,deps={}){
@@ -29,18 +34,22 @@ export async function commissionOnce(env,deps={}){
   let attempt=1;
   if(Number(lock.meta?.changes||0)!==1){
     const row=await db.prepare('SELECT status,result_json FROM commissioning WHERE test_key=?').bind(KEY).first();
-    if(!row||!RETRYABLE.has(row.status))return commissioningStatus(env);
+    if(!row)return commissioningStatus(env);
     let previous;
     try{previous=JSON.parse(row.result_json||'{}');}catch{return commissioningStatus(env);}
-    attempt=previous.diagnosticsVersion===DIAGNOSTICS_VERSION?(Number.isInteger(previous.attempt)&&previous.attempt>0?previous.attempt:1)+1:1;
+    const oldChecking=row.status==='checking'&&Number.isFinite(previous.startedAt)&&now-previous.startedAt>=RECOVERY_MS;
+    const oldFailure=RETRYABLE.has(row.status)&&previous.retryAvailable===false&&Number.isFinite(previous.finishedAt)&&now-previous.finishedAt>=6*3600000;
+    if(!RETRYABLE.has(row.status)&&!oldChecking)return commissioningStatus(env);
+    attempt=oldFailure||oldChecking?1:previous.diagnosticsVersion===DIAGNOSTICS_VERSION?(Number.isInteger(previous.attempt)&&previous.attempt>0?previous.attempt:1)+1:1;
     if(attempt>MAX_ATTEMPTS)return commissioningStatus(env);
     // Atomic compare-and-set: only one worker can resume a pre-delivery failure.
     const retry=await db.prepare("UPDATE commissioning SET status='checking',result_json=? WHERE test_key=? AND status=? AND result_json IS ?")
-      .bind(JSON.stringify({attempt,diagnosticsVersion:DIAGNOSTICS_VERSION}),KEY,row.status,row.result_json).run();
+      .bind(JSON.stringify({attempt,diagnosticsVersion:DIAGNOSTICS_VERSION,startedAt:now}),KEY,row.status,row.result_json).run();
     if(Number(retry.meta?.changes||0)!==1)return commissioningStatus(env);
   }
+  if(Number(lock.meta?.changes||0)===1)await db.prepare('UPDATE commissioning SET status=?,result_json=? WHERE test_key=?').bind('checking',JSON.stringify({attempt,diagnosticsVersion:DIAGNOSTICS_VERSION,startedAt:now}),KEY).run();
   const save=async(status,result={})=>{
-    const data={...result,diagnosticsVersion:DIAGNOSTICS_VERSION,attempt,maxAttempts:MAX_ATTEMPTS,retryAvailable:RETRYABLE.has(status)&&attempt<MAX_ATTEMPTS};
+    const data={...result,startedAt:now,finishedAt:Date.now(),diagnosticsVersion:DIAGNOSTICS_VERSION,attempt,maxAttempts:MAX_ATTEMPTS,retryAvailable:RETRYABLE.has(status)&&attempt<MAX_ATTEMPTS};
     await db.prepare('UPDATE commissioning SET status=?,result_json=? WHERE test_key=?').bind(status,JSON.stringify(data),KEY).run();
     return {status,...data};
   };
