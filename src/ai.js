@@ -1,5 +1,5 @@
 import {enrichArticle} from './news.js';
-import {recordUsage} from './usage.js';
+import {recordUsage,usageStatus,quotaBlocked} from './usage.js';
 import {russianDraftProblem} from './translator.js';
 const SYSTEM = [
   'Ты профессиональный переводчик и русскоязычный редактор Telegram-канала Game Scanner. Переведи смысл исходного материала на естественный русский язык независимо от языка источника. Заголовок и основной текст обязательно должны быть на русском. Не копируй английские предложения даже при нехватке информации; оставляй без перевода только официальные названия игр, компаний, платформ и общепринятые сокращения. Сохраняй точный смысл, условия, ограничения, даты и единицы измерения. Если не можешь сделать достоверный русский текст, откажись от публикации.',
@@ -62,7 +62,7 @@ function clean(value,max){
 }
 function numbers(text){return [...new Set((String(text).match(/\d+(?:[.,]\d+)?/g)||[]).map(n=>n.replace(',','.')))];}
 export function verifyDraft(draft,article,editorial={}){
-  const evidence=String(article?.title||'')+' '+String(article?.description||'')+' '+String(article?.articleContext||'');
+  const evidence=String(article?.title||'')+' '+String(article?.description||'')+' '+String(article?.articleContext||'')+' '+String(article?.feedContext||'');
   const produced=draft.headline+' '+draft.body;
   const inputNums=new Set(numbers(evidence));
   // Require explicit evidence for monetary values rather than borrowing unrelated numerals.
@@ -85,6 +85,7 @@ export function verifyDraft(draft,article,editorial={}){
   for(const m of produced.matchAll(/компани[яи]\s+([A-Za-z][A-Za-z0-9&.-]*(?:\s+[A-Za-z][A-Za-z0-9&.-]*){0,3})/gi)){
     if(!evidence.toLowerCase().includes(m[1].toLowerCase()))throw new EditorialSkip('company_not_in_source');
   }
+  if(/\b(?:rumor|rumour) (?:is |was )?(?:false|debunked)|\b(?:denied|debunked|refuted) (?:the |a )?(?:rumor|rumour|report|leak)\b/i.test(evidence)&&!/(?:опроверг|отрица|не подтверд|ложн|неверн)/i.test(produced))throw new EditorialSkip('denial_missing');
   if(editorial.rumor&&!/по (?:сообщени|данным)|предположительно|слух|неподтвержд|возможно/i.test(produced))
     throw new EditorialSkip('rumor_presented_as_fact');
   return draft;
@@ -117,6 +118,7 @@ export const PRIMARY_MODEL='@cf/openai/gpt-oss-20b';
 export const BACKUP_MODEL='@cf/google/gemma-4-26b-a4b-it';
 export async function writeWithModel(article,env,model,editorial={},translationRetry=false){
   if(!env.AI)throw new ModelFailure({stage:'request',reason:'missing_ai_binding'});
+  if(env.DB&&quotaBlocked(await usageStatus(env.DB)))throw new ModelFailure({stage:'request',reason:'daily_quota'});
   const messages=[
     {role:'system',content:SYSTEM+(translationRetry?' Предыдущий редактор не прошёл проверку русского текста. Напиши новый достоверный перевод на русском, не повторяя английский исходник.':'')+(article.gameDetailsRequired?' Для релиза или анонса: три законченных предложения, первое о событии, следующие два о жанре, механике или особенностях игры. Не повторяй одну мысль. Если фактов мало, откажись от публикации. Используй также предоставленный articleContext.':'')},
     {role:'user',content:JSON.stringify({source:article.source,category:editorial.category||'Главные игровые новости',
