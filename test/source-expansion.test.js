@@ -10,7 +10,7 @@ import {publishPost} from '../src/telegram.js';
 import {coverPngBytes} from '../src/cover.js';
 const now=Date.parse('2026-11-26T00:00:00Z');
 const article={source:'Gematsu',title:'Digimon Alysion now available',description:'A new mobile card game is now available.',url:'https://www.gematsu.com/digimon',publishedAt:now};
-const second={...article,url:article.url+'-2',title:'New Doom gameplay trailer'};
+const second={...article,url:article.url+'-2',title:'New Doom gameplay trailer',publishedAt:now-6*3600000};
 const img={mime:'image/png',bytes:coverPngBytes(),url:'https://www.gematsu.com/photo.png',method:'rss'};
 const full={publish:true,headline:'Digimon Alysion вышла',body:'Мобильная игра уже доступна. Игроки собирают собственные колоды карт. В основе игрового процесса лежат карточные сражения.'};
 test('15 unique publishers and 16 feeds, all with media domains',()=>{
@@ -40,7 +40,7 @@ test('original photo in later story preferred over first cover',async()=>{
  for await(const x of photoCandidates([article,second],{checks,findImage:async a=>{seen.push(a.url);return a.url===second.url?img:null;}})){
   assert.equal(x.article.url,second.url);assert.equal(x.image,img);break;
  }
- assert.equal(seen.length,2);assert.equal(checks.filter(x=>x.found).length,1);
+ assert.deepEqual(seen,[article.url,second.url]);assert.equal(checks.filter(x=>x.found).length,1);
 });
 test('cover fallback only after image search, never for already published news',async()=>{
  const list=[];
