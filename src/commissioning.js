@@ -44,12 +44,13 @@ export async function commissionOnce(env,deps={}){
     const model=env.AI_BACKUP_MODEL||BACKUP_MODEL;
     const draft=await (deps.writePost||writePost)(article,{...env,AI_MODEL:model,AI_BACKUP_MODEL:model},fetchFn,assessArticle(article));
     if(draft.engine!==model)return save('backup_not_verified');
-    gemma={model,backupVerified:true,source:article.source,imageMode:'publisher',imageMethod:image.method};
+    gemma={model,backupVerified:true,source:article.source,imageMode:'publisher',imageMethod:image.method,articleUrl:article.url};
     const day=dayKey(now,5);
     if(!await claim(db,article,day,now))return save('article_already_claimed',gemma);
     claimed=article.url;
     await save('sending',gemma);
     const id=await (deps.sendPublisherPhoto||sendPublisherPhoto)(draft,article,image,env,fetchFn);
+    if(!Number.isInteger(id)||id<=0)throw Error('Missing Telegram message ID');
     await markSent(db,article.url,id);
     return save('sent',{...gemma,messageId:id});
   }catch(e){
