@@ -1,3 +1,4 @@
+import {extractInlineImages,trustedImageUrl} from './images.js';
 import { SOURCES } from './sources.js';
 
 const MAX_FEED_BYTES = 750000;
@@ -41,7 +42,8 @@ function feedLink(xml) {
   if(rss)return cleanText(rss,2048);
   return xml.match(/<link\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*\/?\s*>/i)?.[1]||'';
 }
-function mediaUrl(xml) {
+function mediaUrls(xml) {
+  const urls=[];
   for(const hit of xml.matchAll(/<(?:media:thumbnail|media:content|enclosure)\b[^>]*>/gi)){
     const tag=hit[0],type=attr(tag,'type'),medium=attr(tag,'medium');
     if(type&&!/^image\//i.test(type))continue;
@@ -50,9 +52,9 @@ function mediaUrl(xml) {
     // Untyped RSS enclosures are sometimes links to HTML articles, not images.
     // For an untyped enclosure accept only filenames resembling actual image files.
     if(/^<enclosure\b/i.test(tag)&&!type&&!/\.(?:jpe?g|png|gif|webp|avif)(?:[?#]|$)/i.test(url))continue;
-    if(url)return url;
+    if(url)urls.push(decodeEntities(url));
   }
-  return '';
+  return urls;
 }
 export function parseFeed(xml,source) {
   const blocks=[...String(xml).matchAll(/<(item|entry)(?:\s[^>]*)?>([\s\S]*?)<\/\1>/gi)].slice(0,MAX_ITEMS_PER_FEED);
@@ -62,7 +64,14 @@ export function parseFeed(xml,source) {
     const description=cleanText(tag(block,'description')||tag(block,'summary')||tag(block,'content:encoded'),540);
     const rawDate=cleanText(tag(block,'pubDate')||tag(block,'published')||tag(block,'updated'),80);
     const publishedAt=Date.parse(rawDate);
-    return {title,url,description,publishedAt,source:source.name,image:mediaUrl(block)};
+    const article={title,url,description,publishedAt,source:source.name};
+    const candidates=mediaUrls(block).map(u=>trustedImageUrl(u,article)).filter(Boolean);
+    for(const field of ['description','summary','content:encoded','content']){
+      const raw=tag(block,field).replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,'$1');
+      for(const u of extractInlineImages(raw.includes('<img')?raw:decodeEntities(raw),article))candidates.push(u);
+    }
+    const imageCandidates=[...new Set(candidates)].slice(0,12);
+    return {...article,image:imageCandidates[0]||'',imageCandidates};
   }).filter(item=>item.title.length>8&&item.url&&Number.isFinite(item.publishedAt));
 }
 export function eligible(item,now,maxAgeHours=72) {
