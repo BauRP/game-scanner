@@ -47,18 +47,21 @@ export async function sendPublisherPhoto(draft,article,image,env,fetchFn=fetch){
   const sent=await callApi(env.TELEGRAM_BOT_TOKEN,'sendPhoto',{body:data},fetchFn);
   return sent.message_id;
 }
-export async function publishPost(draft,article,env,fetchFn=fetch){
+export async function publishPost(draft,article,env,fetchFn=fetch,selection=undefined){
   const caption=composePost(draft,article);
   // Publisher photos may be copyrighted: permission must be considered by channel owner.
   if(env.USE_SOURCE_IMAGES==='true'){
-    const image=await findArticleImage(article,fetchFn);
+    const image=selection===undefined?await findArticleImage(article,fetchFn):selection.image;
     if(image){
       try{
-        return await sendPublisherPhoto(draft,article,image,env,fetchFn);
+        const id=await sendPublisherPhoto(draft,article,image,env,fetchFn);
+        if(selection?.check)selection.check.accepted=true;
+        return id;
       }catch(e){
         // HTTP 400 proves the image was rejected and not published.
         // Unknown network/5xx failures are NEVER retried to avoid duplicate posts.
         if(!(e instanceof TelegramApiError&&e.status===400))throw e;
+        if(selection?.check)selection.check.accepted=false;
         console.warn('Source image rejected; using original Game Scanner cover');
       }
     }
