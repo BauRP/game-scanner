@@ -17,7 +17,7 @@ function database(initial=null){
      let changes=0;
      if(sql.startsWith('CREATE '))return {meta:{changes}};
      if(sql.startsWith('INSERT OR IGNORE INTO commissioning')){
-       if(!record){record={status:'checking',result_json:null};changes=1;}
+       if(!record){record={status:'checking',result_json:args[1]||null};changes=1;}
       }else if(sql.startsWith("UPDATE commissioning SET status='checking'")){
        if(record?.status===args[2]&&record.result_json===args[3]){
          record={status:'checking',result_json:args[0]};changes=1;
