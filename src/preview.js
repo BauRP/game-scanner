@@ -40,7 +40,7 @@ export async function createAiPreview(env,deps={}){
   }catch(e){
     await env.DB.prepare("UPDATE ai_previews SET status='failed' WHERE preview_key=?").bind(KEY).run();
     console.error('AI preview failed:',String(e?.message||e).slice(0,160));
-    return json({status:'failed',message:'Не удалось получить проверенный черновик. Автопубликация остаётся выключенной.'},503);
+    return json({status:'failed',message:'Не удалось получить проверенный черновик. Настройки автопубликации не изменены.'},503);
   }
 }
 export async function refreshPreviewImage(env,deps={}){
@@ -65,4 +65,4 @@ export async function refreshPreviewImage(env,deps={}){
   }
 }
 
-export const previewHtml='<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Game Scanner — ИИ</title><body style="font:18px system-ui;max-width:650px;margin:65px auto;padding:20px"><h2>🎮 Game Scanner: проверка GPT-OSS 20B</h2><p>Программа возьмёт одну свежую новость, выберет изображение и попросит GPT-OSS 20B или резервную Gemma составить текст на русском. <b>В Telegram ничего не публикуется.</b></p><form method="post" action="/ai-preview"><button style="font:inherit;padding:14px 20px;cursor:pointer">Проверить ИИ на одной новости</button></form><p><a href="/ai-preview-status">Посмотреть сохранённый результат</a></p><form method="post" action="/ai-preview-image"><button style="font:inherit;padding:14px 20px;cursor:pointer">Повторно проверить картинку (без запуска ИИ)</button></form></body></html>';
+export const previewHtml='<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Game Scanner — ИИ</title><body style="font:18px system-ui;max-width:650px;margin:65px auto;padding:20px"><h2>🎮 Game Scanner: проверка GPT-OSS 20B</h2><p>Программа возьмёт одну свежую новость, выберет изображение и попросит GPT-OSS 20B или резервную Gemma составить текст на русском. <b>В Telegram ничего не публикуется.</b></p><form method="post" action="/ai-preview"><label>Ключ администратора <input name="admin_key" type="password" required autocomplete="off"></label><button style="font:inherit;padding:14px 20px;cursor:pointer">Проверить ИИ на одной новости</button></form><p><a href="/ai-preview-status">Посмотреть сохранённый результат</a></p><form method="post" action="/ai-preview-image"><label>Ключ администратора <input name="admin_key" type="password" required autocomplete="off"></label><button style="font:inherit;padding:14px 20px;cursor:pointer">Повторно проверить картинку (без запуска ИИ)</button></form></body></html>';
