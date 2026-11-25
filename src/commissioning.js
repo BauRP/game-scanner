@@ -31,10 +31,12 @@ export async function commissionOnce(env,deps={}){
   try{
     await initialize(db);
     const {articles}=await (deps.fetchNews||fetchNews)(fetchFn,now,72);
-    const candidates=articles.filter(a=>assessArticle(a).eligible).slice(0,4);
+    const candidates=articles.filter(a=>assessArticle(a).eligible);
+    let checked=0;
     let picked;
     for(const article of candidates){
       if(await alreadyAttempted(db,article.url))continue;
+      if(checked++>=4)break;
       const image=await (deps.findArticleImage||findArticleImage)(article,fetchFn);
       if(image){picked={article,image};break;}
     }
