@@ -64,7 +64,8 @@ export function parseFeed(xml,source) {
     const description=cleanText(tag(block,'description')||tag(block,'summary')||tag(block,'content:encoded'),540);
     const rawDate=cleanText(tag(block,'pubDate')||tag(block,'published')||tag(block,'updated'),80);
     const publishedAt=Date.parse(rawDate);
-    const article={title,url,description,publishedAt,source:source.name};
+    const feedContext=cleanText(tag(block,'content:encoded')||tag(block,'content')||tag(block,'description')||tag(block,'summary'),3200);
+    const article={title,url,description,feedContext,publishedAt,source:source.name};
     const candidates=mediaUrls(block).map(u=>trustedImageUrl(u,article)).filter(Boolean);
     for(const field of ['description','summary','content:encoded','content']){
       const raw=tag(block,field).replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,'$1');
@@ -108,4 +109,61 @@ export async function fetchNews(fetchFn=fetch,now=Date.now(),maxAgeHours=72) {
   const unique=new Map();
   for(const item of rankNews(items))if(!unique.has(item.url))unique.set(item.url,item);
   return {articles:[...unique.values()],errors};
+}
+
+export function needsGameContext(article,editorial={}){
+  return /^(Новые игры и релизы|Анонсы и трейлеры)$/.test(editorial.category||'')||
+    /\b(now available|out now|launch(?:es|ed)?|release(?:d| date)?|announc(?:es|ed|ement)|unveil(?:s|ed)?|reveal(?:s|ed)?|debut|gameplay trailer|new trailer)\b/i.test(article.title||'');
+}
+export function extractArticleContext(html){
+  const text=String(html).replace(/<(script|style|nav|aside|footer|form|noscript|iframe)\b[^>]*>[\s\S]*?<\/\1>/gi,' ');
+  const main=text.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1]||
+    text.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1];
+  if(!main)return '';
+  const parts=[];
+  for(const [,p] of main.matchAll(/<(?:p|li)\b[^>]*>([\s\S]*?)<\/(?:p|li)>/gi)){
+    const value=cleanText(p,700);
+    if(value.length<35||/^(?:read more|related|subscribe|advertisement|follow us|sign up|share this|cookie|privacy policy|comments\b)/i.test(value))continue;
+    if(!parts.includes(value))parts.push(value);
+    if(parts.join(' ').length>=3200)break;
+  }
+  return parts.join(' ').slice(0,3200);
+}
+async function articleHtml(response){
+  const reader=response.body?.getReader();
+  if(!reader)return '';
+  const decoder=new TextDecoder();let size=0,html='';
+  try{
+    while(size<1000000){
+      const {done,value}=await reader.read();if(done)break;
+      const chunk=value.subarray(0,1000000-size);size+=chunk.byteLength;
+      html+=decoder.decode(chunk,{stream:true});
+    }
+    return html+decoder.decode();
+  }finally{await reader.cancel().catch(()=>{});}
+}
+export async function enrichArticle(article,editorial={},fetchFn=fetch){
+  if(!needsGameContext(article,editorial))return article;
+  const source=SOURCES.find(s=>s.name===article.source);
+  const feed=String(article.feedContext||'').slice(0,3200);
+  let page='';
+  if(source){
+    let url=normalizedUrl(String(article.url||''),source.hosts);
+    try{
+      const deadline=Date.now()+8000;
+      for(let i=0;i<3&&url&&Date.now()<deadline;i++){
+        if(new URL(url).port)break;
+        const response=await fetchFn(url,{redirect:'manual',headers:{Accept:'text/html,application/xhtml+xml','User-Agent':'GameScannerNewsBot/1.0'},signal:AbortSignal.timeout(Math.max(1,deadline-Date.now()))});
+        if([301,302,303,307,308].includes(response.status)){
+          const loc=response.headers.get('location');await response.body?.cancel().catch(()=>{});
+          url=loc?normalizedUrl(new URL(loc,url).href,source.hosts):'';continue;
+        }
+        if(response.ok&&/text\/html|application\/xhtml\+xml/i.test(response.headers.get('content-type')||''))page=extractArticleContext(await articleHtml(response));
+        else await response.body?.cancel().catch(()=>{});
+        break;
+      }
+    }catch{/* Preserve verified feed information if the article is temporarily inaccessible. */}
+  }
+  const context=[article.description,feed,page].filter(Boolean).filter((v,i,a)=>!a.some((other,j)=>j!==i&&other.includes(v)&&(other.length>v.length||j<i))).join('\n').slice(0,6500);
+  return {...article,gameDetailsRequired:true,articleContext:context,contextSource:page?'publisher_article':feed?'rss':'summary'};
 }
