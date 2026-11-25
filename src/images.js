@@ -56,6 +56,14 @@ export function extractInlineImages(html,article){
     if(/(?:^|\s)(?:avatar|logo|advertisement|related-post|author-photo)(?:\s|$)/i.test(a.class||''))continue;
     for(const value of [a['data-src'],a['data-lazy-src'],a['data-original'],...srcset(a['data-srcset']||a.srcset),a.src])add(list,value,article);
   }
+  // Modern publisher pages frequently offer AVIF plus JPEG/WebP alternatives.
+  for(const [picture] of String(html).matchAll(/<picture\b[^>]*>[\s\S]*?<\/picture>/gi)){
+    for(const [tag] of picture.matchAll(/<source\b[^>]*>/gi)){
+      const a=attrs(tag);
+      if(a.type&&!/^image\/(?:jpeg|png|webp)$/i.test(a.type))continue;
+      for(const value of srcset(a['data-srcset']||a.srcset))add(list,value,article);
+    }
+  }
   return list;
 }
 export function extractImageCandidates(html,article){
@@ -204,7 +212,9 @@ export async function findArticleImage(article,fetchFn=fetch){
     if(hit){
       if(!hit.res.headers.get('content-type')||/(?:text\/html|application\/xhtml\+xml)/i.test(hit.res.headers.get('content-type'))){
         const html=new TextDecoder().decode(await readLimited(hit.res,MAX_HTML,true));
-        const image=await tryList(extractImageCandidates(html,{...article,url:hit.url}),'article',MAX_CANDIDATES);
+        const candidates=extractImageCandidates(html,{...article,url:hit.url});
+        candidates.sort((a,b)=>Number(/\.avif(?:[?#]|$)/i.test(a))-Number(/\.avif(?:[?#]|$)/i.test(b)));
+        const image=await tryList(candidates,'article',MAX_CANDIDATES);
         if(image)return image;
       }else await hit.res.body?.cancel().catch(()=>{});
     }
