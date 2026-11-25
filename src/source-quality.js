@@ -10,7 +10,7 @@ export function combineQuality(previous={},feeds=[],checks=[]){
    const v=result[source]={...(result[source]||{})};
    v.lastFeedOk=Boolean(ok);v.lastFeedCheckAt=new Date().toISOString();
    v.feedChecks=(v.feedChecks||0)+1;v.feedOk=(v.feedOk||0)+Number(ok);
-   v.articles=(v.articles||0)+articles;v.withImage=(v.withImage||0)+withImage;
+   v.articles=(v.articles||0)+(Number.isFinite(articles)?articles:0);v.withImage=(v.withImage||0)+(Number.isFinite(withImage)?withImage:0);
  }
  for(const {source,found,accepted} of checks){
    const v=result[source]={...(result[source]||{})};
