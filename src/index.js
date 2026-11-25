@@ -1,6 +1,8 @@
 import {fetchNews} from './news.js';
-import {initialize,dayKey,alreadyAttempted,publishedCount,claim,markSent,markFailed} from './storage.js';
-import {writePost} from './ai.js';
+import {initialize,dayKey,alreadyAttempted,publishedCount,claim,markSent,markFailed,releaseClaim} from './storage.js';
+import {writePost,EditorialSkip} from './ai.js';
+import {assessArticle} from './editorial.js';
+import {previewHtml,previewStatus,createAiPreview} from './preview.js';
 import {publishPost,telegramCall} from './telegram.js';
 const intVal=(value,fallback,min,max)=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
 export async function runCycle(env,deps={}){
@@ -13,16 +15,30 @@ export async function runCycle(env,deps={}){
   if(await publishedCount(env.DB,day)>=max)return {status:'daily_limit',day};
   const {articles,errors}=await (deps.fetchNews||fetchNews)(deps.fetchFn||fetch,now,intVal(env.MAX_ARTICLE_AGE_HOURS,72,1,168));
   for(const item of articles){
+    const editorial=assessArticle(item);
+    if(!editorial.eligible)continue;
     if(await alreadyAttempted(env.DB,item.url))continue;
     if(!await claim(env.DB,item,day,now))continue;
+    let draft;
     try{
-      const draft=await (deps.writePost||writePost)(item,env,deps.fetchFn||fetch);
+      draft=await (deps.writePost||writePost)(item,env,deps.fetchFn||fetch,editorial);
+    }catch(e){
+      if(e instanceof EditorialSkip){
+        await markFailed(env.DB,item.url);
+        continue;
+      }
+      // AI failure happened BEFORE any Telegram request. Safe to release the claim.
+      await releaseClaim(env.DB,item.url);
+      console.error('AI unavailable; nothing was published:',String(e?.message||e).slice(0,140));
+      return {status:'ai_unavailable',day};
+    }
+    try{
       const messageId=await (deps.publishPost||publishPost)(draft,item,env,deps.fetchFn||fetch);
       await markSent(env.DB,item.url,messageId);
-      return {status:'sent',source:item.source,engine:draft.engine,day};
+      return {status:'sent',source:item.source,engine:draft.engine,category:editorial.category,day};
     }catch(e){
-      await markFailed(env.DB,item.url);
       // Never auto retry ambiguous Telegram delivery, which can cause duplicates.
+      await markFailed(env.DB,item.url);
       console.error('Posting failed:',String(e?.message||e).slice(0,140));
       return {status:'post_failed',day};
     }
@@ -69,6 +85,14 @@ export default {
   },
   async fetch(request,env){
     const url=new URL(request.url);
+    if(url.pathname==='/ai-preview-status'&&request.method==='GET'){
+      return Response.json(await previewStatus(env),{headers:{'Cache-Control':'no-store'}});
+    }
+    if(url.pathname==='/ai-preview'){
+      if(request.method==='GET')return new Response(previewHtml,{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'}});
+      if(request.method==='POST')return createAiPreview(env);
+      return new Response('Method Not Allowed',{status:405,headers:{Allow:'GET, POST'}});
+    }
     if(url.pathname==='/test-message'){
       if(request.method==='POST'){
         try{

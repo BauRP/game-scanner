@@ -18,6 +18,10 @@ export async function claim(db,item,day,now){
 export async function markSent(db,url,messageId){
   await db.prepare("UPDATE posts SET status = 'sent',telegram_message_id = ? WHERE url = ? AND status = 'processing'").bind(messageId||null,url).run();
 }
+export async function releaseClaim(db,url){
+  // Only release BEFORE Telegram delivery is attempted.
+  await db.prepare("DELETE FROM posts WHERE url = ? AND status = 'processing'").bind(url).run();
+}
 export async function markFailed(db,url){
   // Keep failed claim: retries after an ambiguous Telegram delivery can duplicate posts.
   await db.prepare("UPDATE posts SET status = 'failed' WHERE url = ? AND status = 'processing'").bind(url).run();
