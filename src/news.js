@@ -62,15 +62,17 @@ export function parseFeed(xml,source,now=null,maxAgeHours=72) {
   return blocks.map(([, ,block])=>{
     const title=cleanText(tag(block,'title'),160);
     const url=normalizedUrl(feedLink(block),source.hosts);
-    const description=cleanText(tag(block,'description')||tag(block,'summary')||tag(block,'content:encoded'),540);
     const rawDate=cleanText(tag(block,'pubDate')||tag(block,'published')||tag(block,'updated'),80);
     const publishedAt=Date.parse(rawDate);
     if(!url||title.length<=8||!Number.isFinite(publishedAt)||(now!==null&&!eligible({title,publishedAt},now,maxAgeHours)))return null;
-    const feedContext=cleanText(tag(block,'content:encoded')||tag(block,'content')||tag(block,'description')||tag(block,'summary'),3200);
+    const rawFields=['description','summary','content:encoded','content'].map(field=>tag(block,field));
+    const description=cleanText(rawFields[0]||rawFields[1]||rawFields[2],540);
+    const feedContext=cleanText(rawFields[2]||rawFields[3]||rawFields[0]||rawFields[1],3200);
     const article={title,url,description,feedContext,publishedAt,source:source.name};
     const candidates=mediaUrls(block).map(u=>trustedImageUrl(u,article)).filter(Boolean);
-    for(const field of ['description','summary','content:encoded','content']){
-      const raw=tag(block,field).replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,'$1');
+    for(const field of new Set(rawFields.filter(Boolean))){
+      if(candidates.length>=12)break;
+      const raw=field.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,'$1');
       for(const u of extractInlineImages(raw.includes('<img')?raw:decodeEntities(raw),article))candidates.push(u);
     }
     const imageCandidates=[...new Set(candidates)].slice(0,12);
