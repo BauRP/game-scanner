@@ -4,7 +4,6 @@ import {readQuality,saveQuality,qualityStatus} from './source-quality.js';
 import {fetchNews} from './news.js';
 import {initialize,dayKey,alreadyAttempted,publishedCount,claim,markSent,markFailed,releaseClaim,reserveHour,recentTitleKeys,titleKey} from './storage.js';
 import {writePost,EditorialSkip} from './ai.js';
-import {assessArticle} from './editorial.js';
 import {previewHtml,previewStatus,createAiPreview,refreshPreviewImage} from './preview.js';
 import {publishPost,telegramCall} from './telegram.js';
 const intVal=(value,fallback,min,max)=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
@@ -22,7 +21,7 @@ export async function runCycle(env,deps={}){
   if(await publishedCount(env.DB,day)>=max)return {status:'daily_limit',day};
   if(!await reserveHour(env.DB,now))return {status:'hour_already_reserved',day};
   const previousTitles=await recentTitleKeys(env.DB,now);
-  const {articles,errors,feedStats=[]}=await (deps.fetchNews||fetchNews)(deps.fetchFn||fetch,now,intVal(env.MAX_ARTICLE_AGE_HOURS,72,1,168));
+  const {articles,errors=[],feedStats=[]}=await (deps.fetchNews||fetchNews)(deps.fetchFn||fetch,now,intVal(env.MAX_ARTICLE_AGE_HOURS,72,1,168));
   const checks=[],quality=await readQuality(env.DB);
   let draftsTried=0;
   try{
@@ -46,6 +45,7 @@ export async function runCycle(env,deps={}){
     }
     try{
       const messageId=await (deps.publishPost||publishPost)(draft,item,env,deps.fetchFn||fetch,selection);
+      if(!Number.isInteger(messageId)||messageId<=0)throw Error('Missing Telegram message ID');
       await markSent(env.DB,item.url,messageId);
       return {status:'sent',source:item.source,engine:draft.engine,category:editorial.category,imageMode:selection.check?.accepted===true?'publisher':'game-scanner-cover',day};
     }catch(e){
@@ -96,6 +96,8 @@ export default {
     // Ignore old cron triggers while the Cloudflare schedule propagates.
     if(event?.cron&&event.cron!=='0 * * * *')return;
     const now=Date.now();
+    // Do not replay delayed triggers from an already elapsed hour.
+    if(Number.isFinite(event?.scheduledTime)&&Math.floor(event.scheduledTime/3600000)!==Math.floor(now/3600000))return;
     const work=(async()=>{
       if(env.PUBLISH_ENABLED!=='true'&&env.COMMISSION_ONCE==='true')return commissionOnce(env);
       const result=await runCycle(env,{now});
@@ -103,6 +105,7 @@ export default {
       if(result.status==='commissioning_required'&&env.COMMISSION_ONCE==='true'){
         const state=await commissioningStatus(env);
         if(['sent','sending','delivery_unconfirmed','checking'].includes(state.status)||state.retryAvailable===false)return result;
+        if(!env.AI||env.USE_SOURCE_IMAGES!=='true')return {status:'missing_configuration'};
         if(!await reserveHour(env.DB,now))return {status:'hour_already_reserved'};
         return commissionOnce({...env,PUBLISH_ENABLED:'false'},{now});
       }
