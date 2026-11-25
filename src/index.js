@@ -40,7 +40,7 @@ export async function runCycle(env,deps={}){
   try{news=await (deps.fetchNews||fetchNews)(deps.fetchFn||fetch,now,intVal(env.MAX_ARTICLE_AGE_HOURS,72,1,168));}catch{await releaseHour(env.DB,now);return {status:'feed_unavailable',day};}
   const {articles,errors=[],feedStats=[]}=news;
   const checks=[],quality=await readQuality(env.DB);
-  let draftsTried=0;
+  let draftsTried=0,rejected=0;
   const checkedArticles=new Set();
   try{
   for await(const selection of photoCandidates(articles.filter(a=>!previousTitles.has(titleKey(a.title))&&!isSimilarTitle(a.title,titleIndex)),{fetchFn:deps.fetchFn||fetch,findImage:deps.findArticleImage,wasAttempted:url=>alreadyAttempted(env.DB,url),useImages:env.USE_SOURCE_IMAGES==='true',quality,checks,recentCategories:recent})){
@@ -60,6 +60,7 @@ export async function runCycle(env,deps={}){
     }catch(e){
       if(e instanceof EditorialSkip){
         await markFailed(env.DB,item.url);
+        rejected++;
         continue;
       }
       // AI failure happened BEFORE any Telegram request. Safe to release the claim.
@@ -84,7 +85,7 @@ export async function runCycle(env,deps={}){
   }
   if(errors.length)console.warn('Feeds unavailable:',errors.join(' | '));
   if(!articles.length&&errors.length)await releaseHour(env.DB,now);
-  return {status:articles.length?'no_new_articles':'no_fresh_articles',failedFeeds:errors.length,day};
+  return {status:rejected?'editorial_rejected':articles.length?'no_new_articles':'no_fresh_articles',failedFeeds:errors.length,rejected,day};
   }finally{await saveQuality(env.DB,feedStats,checks);}
 }
 
@@ -211,7 +212,7 @@ export default {
     }
     if(request.method==='POST'&&url.pathname==='/run'){
       if(!env.ADMIN_KEY||request.headers.get('Authorization')!=='Bearer '+env.ADMIN_KEY)return new Response('Unauthorized',{status:401});
-      try{const now=Date.now(),result=await runCycle(env,{now});await recordCycle(env.DB,now,result);return Response.json(result);}
+      try{const now=Date.now(),result=await runCycle(env,{now,clock:Date.now});await recordCycle(env.DB,now,result);return Response.json(result);}
       catch(e){console.error('Manual run failed:',String(e?.message||e).slice(0,140));return Response.json({error:'Run failed; check Worker logs'},{status:500});}
     }
     return new Response('Not found',{status:404});
