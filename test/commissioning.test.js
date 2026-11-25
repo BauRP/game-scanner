@@ -18,6 +18,10 @@ function database(){
      if(sql.startsWith('CREATE '))return {meta:{changes}};
      if(sql.startsWith('INSERT OR IGNORE INTO commissioning')){
        if(!record){record={status:'checking',result_json:null};changes=1;}
+      }else if(sql.startsWith("UPDATE commissioning SET status='checking'")){
+       if(record?.status===args[2]&&record.result_json===args[3]){
+         record={status:'checking',result_json:args[0]};changes=1;
+       }
      }else if(sql.startsWith('UPDATE commissioning')){
        record={status:args[0],result_json:args[1]};changes=1;
      }else if(sql.startsWith('INSERT OR IGNORE INTO posts')){
@@ -85,4 +89,28 @@ test('commissioning searches another eligible story if the first has no photo',a
  const original=deps.findArticleImage;deps.findArticleImage=async a=>a.url===item.url?null:original(a);
  const r=await commissionOnce(env,deps);
  assert.equal(r.status,'sent');assert.equal(r.articleUrl,second.url);assert.equal(calls.send,1);
+});
+
+test('temporary image failure can recover on the next attempt',async()=>{
+ const {env,deps,calls}=setup();const original=deps.findArticleImage;
+ deps.findArticleImage=async()=>null;
+ const first=await commissionOnce(env,deps);
+ assert.equal(first.status,'no_original_image');assert.equal(first.attempt,1);assert.equal(first.retryAvailable,true);
+ deps.findArticleImage=original;
+ const recovered=await commissionOnce(env,deps);
+ assert.equal(recovered.status,'sent');assert.equal(recovered.attempt,2);
+ assert.equal((await commissionOnce(env,deps)).status,'sent');assert.equal(calls.send,1);
+});
+test('temporary Gemma failure has a strict three-attempt limit',async()=>{
+ const {env,deps,calls}=setup();deps.writePost=async()=>{calls.ai++;throw Error('quota');};
+ for(let n=1;n<=3;n++){
+  const r=await commissionOnce(env,deps);assert.equal(r.status,'check_failed');assert.equal(r.attempt,n);assert.equal(r.retryAvailable,n<3);
+ }
+ const fourth=await commissionOnce(env,deps);assert.equal(fourth.attempt,3);assert.deepEqual(calls,{ai:3,send:0});
+});
+test('concurrent retries acquire only one atomic lock',async()=>{
+ const {env,deps,calls}=setup();const original=deps.findArticleImage;
+ deps.findArticleImage=async()=>null;await commissionOnce(env,deps);deps.findArticleImage=original;
+ const results=await Promise.all([commissionOnce(env,deps),commissionOnce(env,deps)]);
+ assert.ok(results.some(r=>r.status==='sent'));assert.equal(calls.send,1);assert.equal(calls.ai,1);
 });
