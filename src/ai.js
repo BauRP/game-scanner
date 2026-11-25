@@ -7,6 +7,7 @@ const SYSTEM = [
   'Не меняй имя компании или издателя на похожее: например, Bandai Card Games нельзя превращать в Bandai Namco. Если компания не названа точно, лучше не указывать её.',
   'Слухи нельзя выдавать за факт: всегда используй «по сообщениям» или «предположительно», если материал не подтверждён.',
   'В категории бесплатных раздач сообщай только о временной раздаче платной игры. В категории релизов допустимы новые free-to-play игры; не называй их временной раздачей.',
+  'Различай предзаказ, ранний доступ, перенос релиза, ремейк, ремастер, демо, дополнение, временную раздачу и доступ по подписке. Не обещай получение полной игры навсегда или доступность в регионе без прямого подтверждения. Не превращай слова о будущем событии в сообщение о состоявшемся событии.',
   'Текст должен быть самобытным, нейтральным, понятным, без кликбейта, без ссылок, хештегов, markdown и неподтверждённых обещаний.',
   'Ответ СТРОГО в JSON: {"publish":true,"headline":"...","body":"..."}. Заголовок до 85 символов, основной текст от 1 до 3 коротких предложений до 420 символов.'
 ].join(' ');
@@ -61,6 +62,15 @@ export function verifyDraft(draft,article,editorial={}){
   const evidence=String(article?.title||'')+' '+String(article?.description||'')+' '+String(article?.articleContext||'');
   const produced=draft.headline+' '+draft.body;
   const inputNums=new Set(numbers(evidence));
+  const access=editorial.accessType;
+  if(['subscription','trial','addon','pre_release'].includes(access)&&/забрать навсегда|получить игру навсегда|бесплатная раздача полной игры/i.test(produced))throw new EditorialSkip('wrong_access_type');
+  if(access==='pre_release'&&/игра (?:уже )?(?:вышла|состоялся релиз)|полноценный релиз состоялся/i.test(produced)&&!/\b(?:full release|out of early access|1\.0 release)\b/i.test(evidence))throw new EditorialSkip('premature_release');
+  for(const m of produced.matchAll(/(\d+(?:[.,]\d+)?)\s*%/g)){
+    const n=m[1].replace(',','.');
+    if(![...evidence.matchAll(/(\d+(?:[.,]\d+)?)\s*(?:%|percent\b)/gi)].some(x=>x[1].replace(',','.')===n))throw new EditorialSkip('unsupported_percentage');
+  }
+  const platforms=[[/\bPS5\b|PlayStation 5/gi,/\bPS5\b|PlayStation 5/i],[/\bPS4\b|PlayStation 4/gi,/\bPS4\b|PlayStation 4/i],[/\bXbox Series\b/gi,/\bXbox Series\b/i],[/\bNintendo Switch\b/gi,/\bNintendo Switch\b/i]];
+  for(const [out,src] of platforms)if(produced.match(out)&&!src.test(evidence))throw new EditorialSkip('unsupported_platform');
   for(const num of numbers(produced))if(!inputNums.has(num))throw new EditorialSkip('generated_unsupported_number');
   if(/https?:\/\/|www\.|@[a-z\d_]+/i.test(produced))throw new EditorialSkip('generated_unwanted_link');
   // Prevent the AI from inventing or swapping English-language company names.
@@ -80,10 +90,17 @@ export function parseDraft(result,article,editorial){
   catch{const match=raw.match(/\{[\s\S]*\}/);if(!match)throw new Error('AI output was not JSON');obj=JSON.parse(match[0]);}
   if(obj?.publish===false)throw new EditorialSkip('model_declined_unverified_story');
   if(typeof obj?.headline!=='string'||typeof obj?.body!=='string')throw new ModelFailure({stage:'response',reason:'invalid_fields'});
+  if(clean(obj.headline,10000).length>85||clean(obj.body,10000).length>420)throw new EditorialSkip('text_would_be_truncated');
   const headline=clean(obj.headline,85),body=clean(obj.body,420);
   if(article?.gameDetailsRequired&&clean(obj.body,10000).length>420)throw new EditorialSkip('game_details_would_be_truncated');
   if(!headline||!body)throw new EditorialSkip('model_output_incomplete');
   if(article?.gameDetailsRequired&&(body.match(/[^.!?]+[.!?]+(?=\s|$)/g)||[]).filter(x=>x.trim().length>=20).length<3)throw new EditorialSkip('insufficient_game_details');
+  if(article){
+    const letters=body.match(/\p{L}/gu)||[],ru=body.match(/[А-Яа-яЁё]/g)||[];
+    if(letters.length>=25&&ru.length/letters.length<0.45)throw new EditorialSkip('not_russian');
+    const sentences=(body.match(/[^.!?]+[.!?]+(?=\s|$)/g)||[]).map(x=>x.toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim());
+    if(new Set(sentences).size!==sentences.length)throw new EditorialSkip('repeated_sentence');
+  }
   const draft={headline,body};
   return article?verifyDraft(draft,article,editorial):draft;
 }
@@ -94,7 +111,7 @@ export async function writeWithModel(article,env,model,editorial={}){
   const messages=[
     {role:'system',content:SYSTEM+(article.gameDetailsRequired?' Для релиза или анонса: три законченных предложения, первое о событии, следующие два о жанре, механике или особенностях игры. Не повторяй одну мысль. Если фактов мало, откажись от публикации. Используй также предоставленный articleContext.':'')},
     {role:'user',content:JSON.stringify({source:article.source,category:editorial.category||'Главные игровые новости',
-      rumor:Boolean(editorial.rumor),title:article.title,excerpt:article.description||'',articleContext:article.articleContext||'',gameDetailsRequired:Boolean(article.gameDetailsRequired)})}
+      rumor:Boolean(editorial.rumor),accessType:editorial.accessType||null,title:article.title,excerpt:article.description||'',articleContext:article.articleContext||'',gameDetailsRequired:Boolean(article.gameDetailsRequired)})}
   ];
   // Keep the known-working GPT-OSS request unchanged. Gemma uses its current completion budget.
   const options=model.includes('gemma-4')?{messages,temperature:0.15,max_completion_tokens:2048,chat_template_kwargs:{enable_thinking:false}}:{messages,temperature:0.15,max_tokens:650};
