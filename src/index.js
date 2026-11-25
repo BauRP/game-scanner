@@ -2,7 +2,7 @@ import {commissionOnce,commissioningStatus} from './commissioning.js';
 import {photoCandidates} from './photo-selection.js';
 import {readQuality,saveQuality,qualityStatus} from './source-quality.js';
 import {fetchNews} from './news.js';
-import {initialize,dayKey,alreadyAttempted,publishedCount,claim,markSent,markFailed,releaseClaim} from './storage.js';
+import {initialize,dayKey,alreadyAttempted,publishedCount,claim,markSent,markFailed,releaseClaim,reserveHour,recentTitleKeys,titleKey} from './storage.js';
 import {writePost,EditorialSkip} from './ai.js';
 import {assessArticle} from './editorial.js';
 import {previewHtml,previewStatus,createAiPreview,refreshPreviewImage} from './preview.js';
@@ -16,15 +16,17 @@ export async function runCycle(env,deps={}){
     if(result.status!=='sent'||result.primaryVerified!==true||result.backupVerified!==true||result.imageMode!=='publisher'||!Number.isInteger(result.messageId)||result.messageId<=0)return {status:'commissioning_required'};
   }
   const now=deps.now??Date.now();
-  const day=dayKey(now,intVal(env.KZ_UTC_OFFSET_HOURS,5,-12,14));
-  const max=intVal(env.MAX_POSTS_PER_DAY,8,1,10);
+  const day=dayKey(now,0); // Cloudflare free allocation resets at 00:00 UTC (05:00 Kazakhstan).
+  const max=intVal(env.MAX_POSTS_PER_DAY,24,1,24);
   await initialize(env.DB);
   if(await publishedCount(env.DB,day)>=max)return {status:'daily_limit',day};
+  if(!await reserveHour(env.DB,now))return {status:'hour_already_reserved',day};
+  const previousTitles=await recentTitleKeys(env.DB,now);
   const {articles,errors,feedStats=[]}=await (deps.fetchNews||fetchNews)(deps.fetchFn||fetch,now,intVal(env.MAX_ARTICLE_AGE_HOURS,72,1,168));
   const checks=[],quality=await readQuality(env.DB);
   let draftsTried=0;
   try{
-  for await(const selection of photoCandidates(articles,{fetchFn:deps.fetchFn||fetch,findImage:deps.findArticleImage,wasAttempted:url=>alreadyAttempted(env.DB,url),useImages:env.USE_SOURCE_IMAGES==='true',quality,checks})){
+  for await(const selection of photoCandidates(articles.filter(a=>!previousTitles.has(titleKey(a.title))),{fetchFn:deps.fetchFn||fetch,findImage:deps.findArticleImage,wasAttempted:url=>alreadyAttempted(env.DB,url),useImages:env.USE_SOURCE_IMAGES==='true',quality,checks})){
     const {article:item,editorial}=selection;
     if(draftsTried>=2)break;
     if(!await claim(env.DB,item,day,now))continue;
@@ -91,9 +93,21 @@ export async function runOneTimeTest(env, deps = {}) {
 export default {
   async scheduled(event,env,ctx){
     // Test messages are manual only, never sent by cron.
-    // The temporary minute trigger is for commissioning only, never for regular news.
-    if(env.PUBLISH_ENABLED==='true'&&event?.cron&&event.cron!=='0 */3 * * *')return;
-    const work=env.PUBLISH_ENABLED!=='true'&&env.COMMISSION_ONCE==='true'?commissionOnce(env):runCycle(env);
+    // Ignore old cron triggers while the Cloudflare schedule propagates.
+    if(event?.cron&&event.cron!=='0 * * * *')return;
+    const now=Date.now();
+    const work=(async()=>{
+      if(env.PUBLISH_ENABLED!=='true'&&env.COMMISSION_ONCE==='true')return commissionOnce(env);
+      const result=await runCycle(env,{now});
+      // The owner's launch request is armed, but real news remain gated on the two-model test.
+      if(result.status==='commissioning_required'&&env.COMMISSION_ONCE==='true'){
+        const state=await commissioningStatus(env);
+        if(['sent','sending','delivery_unconfirmed','checking'].includes(state.status)||state.retryAvailable===false)return result;
+        if(!await reserveHour(env.DB,now))return {status:'hour_already_reserved'};
+        return commissionOnce({...env,PUBLISH_ENABLED:'false'},{now});
+      }
+      return result;
+    })();
     ctx.waitUntil(work.then(result=>console.log('Game Scanner:',JSON.stringify(result)))
       .catch(e=>console.error('Scheduled cycle failed:',String(e?.message||e).slice(0,140))));
   },
@@ -151,7 +165,7 @@ export default {
       }
       return Response.json({ok:true,service:'game-scanner',publishing:env.PUBLISH_ENABLED==='true',
         telegramConfigured:Boolean(env.TELEGRAM_BOT_TOKEN&&env.TELEGRAM_CHAT_ID),storageConfigured:Boolean(env.DB),
-        testStatus,commissioning:env.COMMISSION_ONCE==='true',imagePipelineVersion:'original-photo-v2',aiDiagnosticsVersion:2,primaryModel:env.AI_MODEL||'@cf/openai/gpt-oss-20b',backupModel:env.AI_BACKUP_MODEL||'@cf/google/gemma-4-26b-a4b-it',sourceImages:env.USE_SOURCE_IMAGES==='true',sourceExpansionVersion:1},{headers:{'Cache-Control':'no-store'}});
+        testStatus,commissioning:env.COMMISSION_ONCE==='true',imagePipelineVersion:'original-photo-v2',aiDiagnosticsVersion:2,primaryModel:env.AI_MODEL||'@cf/openai/gpt-oss-20b',backupModel:env.AI_BACKUP_MODEL||'@cf/google/gemma-4-26b-a4b-it',sourceImages:env.USE_SOURCE_IMAGES==='true',sourceExpansionVersion:1,publicationIntervalMinutes:60,maxPostsPerDay:intVal(env.MAX_POSTS_PER_DAY,24,1,24),quotaResetUtc:'00:00'},{headers:{'Cache-Control':'no-store'}});
     }
     if(request.method==='POST'&&url.pathname==='/run'){
       if(!env.ADMIN_KEY||request.headers.get('Authorization')!=='Bearer '+env.ADMIN_KEY)return new Response('Unauthorized',{status:401});
