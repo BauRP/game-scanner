@@ -16,11 +16,11 @@ async function probe(feed){
  }catch(e){return {source:feed.name,url:feed.url,error:String(e?.message||e).slice(0,120)};}
 }
 for(let i=0;i<FEEDS.length;i+=4)for(const result of await Promise.all(FEEDS.slice(i,i+4).map(probe)))console.log('FEED_PROBE '+JSON.stringify(result));
-for(const path of ['/health','/commissioning-status','/source-quality']){
+for(const path of ['/health','/commissioning-status','/source-quality','/publication-status','/ai-usage']){
  try{
  const r=await fetch('https://game-scanner.bikobaur.workers.dev'+path,{signal:AbortSignal.timeout(10000)});
  const j=await r.json();
- const safe=path==='/health'?{publishing:j.publishing,readyToPublish:j.readyToPublish,publicationIntervalMinutes:j.publicationIntervalMinutes,maxPostsPerDay:j.maxPostsPerDay}:path==='/commissioning-status'?{status:j.status,primaryVerified:j.primaryVerified,backupVerified:j.backupVerified,imageMode:j.imageMode,messageId:j.messageId}:Array.isArray(j)?j.map(v=>({source:v.source,feedChecks:v.feedChecks,feedOk:v.feedOk,photoFound:v.photoFound})):null;
+ const safe=path==='/health'?{publishing:j.publishing,readyToPublish:j.readyToPublish,publicationIntervalMinutes:j.publicationIntervalMinutes,maxPostsPerDay:j.maxPostsPerDay}:path==='/commissioning-status'?{status:j.status,primaryVerified:j.primaryVerified,backupVerified:j.backupVerified,imageMode:j.imageMode,messageId:j.messageId}:path==='/publication-status'?{available:j.available,lastCycle:j.lastCycle,lastPublication:j.lastPublication}:path==='/ai-usage'?{available:j.available,calls:j.calls,measured:j.measured,estimatedNeurons:j.estimatedNeurons,quotaExhausted:j.quotaExhausted}:Array.isArray(j)?j.map(v=>({source:v.source,feedChecks:v.feedChecks,feedOk:v.feedOk,photoFound:v.photoFound})):null;
  console.log('LIVE_PROBE '+JSON.stringify({path,http:r.status,data:safe}));
  }catch(e){console.log('LIVE_PROBE '+JSON.stringify({path,error:String(e?.message||e).slice(0,120)}));}
 }
