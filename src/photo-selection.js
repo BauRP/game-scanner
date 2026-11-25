@@ -10,9 +10,9 @@ export async function* photoCandidates(articles,{fetchFn=fetch,findImage=findArt
  const assess=a=>{if(!assessments.has(a))assessments.set(a,assessArticle(a));return assessments.get(a);};
  // Soft diversity preference only; no eligible category is blocked.
  const recent=recentCategories.slice(0,3);
- if(recent.length>=2&&recent.every(c=>c===recent[0])){
+ if(recent.length>=2&&recent[0]===recent[1]){
    const leading=ranked.slice(0,8);
-   leading.sort((a,b)=>Number(assess(a).category===recent[0])-Number(assess(b).category===recent[0]));
+   leading.sort((a,b)=>{const penalty=x=>Number(assess(x).category===recent[0]&&assess(x).accessType!=='giveaway');return penalty(a)-penalty(b);});
    ranked.splice(0,leading.length,...leading);
  }
  let requests=0,lookups=0,probes=0;const fallbacks=[];
