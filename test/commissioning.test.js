@@ -4,8 +4,8 @@ import {commissionOnce,commissioningStatus} from '../src/commissioning.js';
 import worker,{runCycle} from '../src/index.js';
 
 const item={source:'Gematsu',title:'Doom gameplay trailer released',description:'A new gameplay trailer for Doom was released.',url:'https://www.gematsu.com/2026/11/doom-trailer',publishedAt:Date.now(),image:'https://www.gematsu.com/images/doom.png'};
-function database(){
- let record=null;const posts=new Map();
+function database(initial=null){
+ let record=initial;const posts=new Map();
  return {posts,prepare(sql){
    let args=[];
    return {bind(...a){args=a;return this;},async first(){
@@ -37,17 +37,17 @@ function setup(){
  const env={DB:database(),AI:{},COMMISSION_ONCE:'true',USE_SOURCE_IMAGES:'true',PUBLISH_ENABLED:'false',TELEGRAM_BOT_TOKEN:'fake',TELEGRAM_CHAT_ID:'@fake',AI_BACKUP_MODEL:'gemma-test',AI_MODEL:'gpt-test'};
  const calls={ai:0,send:0};
  const deps={fetchNews:async()=>({articles:[item]}),findArticleImage:async()=>({url:item.image,method:'rss',bytes:new Uint8Array([1]),mime:'image/png'}),
- writePost:async(a,e)=>{calls.ai++;assert.equal(e.AI_MODEL,'gemma-test');assert.equal(e.AI_BACKUP_MODEL,'gemma-test');return {headline:'Doom',body:'Новый трейлер игры.',engine:'gemma-test'};},
+ writePost:async(a,e)=>{calls.ai++;assert.equal(e.AI_MODEL,e.AI_BACKUP_MODEL);return {headline:'Doom',body:'Новый трейлер игры.',engine:e.AI_MODEL};},
  sendPublisherPhoto:async()=>{calls.send++;return 123;}};
  return {env,deps,calls};
 }
-test('commissioning runs backup only, requires original image and persists successful delivery once',async()=>{
+test('commissioning verifies both models independently, requires original image and persists successful delivery once',async()=>{
  const {env,deps,calls}=setup();
  const r=await commissionOnce(env,deps);
- assert.equal(r.status,'sent');assert.equal(r.messageId,123);assert.equal(r.backupVerified,true);
+ assert.equal(r.status,'sent');assert.equal(r.messageId,123);assert.equal(r.backupVerified,true);assert.equal(r.primaryVerified,true);
  assert.equal((await commissioningStatus(env)).status,'sent');
  assert.equal((await commissionOnce(env,deps)).messageId,123);
- assert.deepEqual(calls,{ai:1,send:1});assert.equal(env.DB.posts.get(item.url).status,'sent');
+ assert.deepEqual(calls,{ai:2,send:1});assert.equal(env.DB.posts.get(item.url).status,'sent');
 });
 test('no original photo means no AI use and no Telegram delivery',async()=>{
  const {env,deps,calls}=setup();deps.findArticleImage=async()=>null;
@@ -106,11 +106,38 @@ test('temporary Gemma failure has a strict three-attempt limit',async()=>{
  for(let n=1;n<=3;n++){
   const r=await commissionOnce(env,deps);assert.equal(r.status,'check_failed');assert.equal(r.attempt,n);assert.equal(r.retryAvailable,n<3);
  }
- const fourth=await commissionOnce(env,deps);assert.equal(fourth.attempt,3);assert.deepEqual(calls,{ai:3,send:0});
+ const fourth=await commissionOnce(env,deps);assert.equal(fourth.attempt,3);assert.deepEqual(calls,{ai:6,send:0});
 });
 test('concurrent retries acquire only one atomic lock',async()=>{
  const {env,deps,calls}=setup();const original=deps.findArticleImage;
  deps.findArticleImage=async()=>null;await commissionOnce(env,deps);deps.findArticleImage=original;
  const results=await Promise.all([commissionOnce(env,deps),commissionOnce(env,deps)]);
- assert.ok(results.some(r=>r.status==='sent'));assert.equal(calls.send,1);assert.equal(calls.ai,1);
+ assert.ok(results.some(r=>r.status==='sent'));assert.equal(calls.send,1);assert.equal(calls.ai,2);
+});
+
+test('Gemma failure preserves successful primary diagnostic but sends nothing',async()=>{
+ const {env,deps,calls}=setup();
+ const original=deps.writePost;deps.writePost=async(a,e)=>{if(e.AI_MODEL==='gemma-test')throw Object.assign(Error('quota'),{code:3036});return original(a,e);};
+ const r=await commissionOnce(env,deps);
+ assert.equal(r.status,'check_failed');assert.equal(r.primaryVerified,true);assert.equal(r.backupVerified,false);
+ assert.equal(r.backup.error.reason,'daily_quota');assert.equal(calls.send,0);
+});
+test('primary failure still checks Gemma independently and sends nothing',async()=>{
+ const {env,deps,calls}=setup();
+ const original=deps.writePost;deps.writePost=async(a,e)=>{if(e.AI_MODEL==='gpt-test')throw Error('capacity');return original(a,e);};
+ const r=await commissionOnce(env,deps);
+ assert.equal(r.primaryVerified,false);assert.equal(r.backupVerified,true);assert.equal(calls.send,0);
+});
+test('old failed three-attempt commissioning resumes after diagnostic upgrade',async()=>{
+ const {env,deps,calls}=setup();env.DB=database({status:'check_failed',result_json:JSON.stringify({attempt:3,backupVerified:false})});
+ const r=await commissionOnce(env,deps);
+ assert.equal(r.status,'sent');assert.equal(r.attempt,1);assert.equal(r.diagnosticsVersion,2);assert.equal(calls.send,1);
+});
+test('old ambiguous delivery is never reopened by diagnostics upgrade',async()=>{
+ const {env,deps,calls}=setup();env.DB=database({status:'delivery_unconfirmed',result_json:JSON.stringify({attempt:3})});
+ assert.equal((await commissionOnce(env,deps)).status,'delivery_unconfirmed');assert.equal(calls.send,0);assert.equal(calls.ai,0);
+});
+test('temporary minute trigger cannot publish after normal publishing is enabled',async()=>{
+ const {env}=setup();env.PUBLISH_ENABLED='true';
+ await worker.scheduled({cron:'*/1 * * * *'},env,{waitUntil(){throw Error('unexpected publication');}});
 });

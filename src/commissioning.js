@@ -1,12 +1,13 @@
 import {fetchNews} from './news.js';
 import {assessArticle} from './editorial.js';
-import {writePost,BACKUP_MODEL} from './ai.js';
+import {writePost,BACKUP_MODEL,PRIMARY_MODEL,modelError} from './ai.js';
 import {findArticleImage} from './images.js';
 import {sendPublisherPhoto} from './telegram.js';
 import {initialize,dayKey,alreadyAttempted,claim,markSent,markFailed} from './storage.js';
 
 const KEY='original-photo-gemma-20261125';
 const MAX_ATTEMPTS=3;
+const DIAGNOSTICS_VERSION=2;
 const RETRYABLE=new Set(['no_original_image','backup_not_verified','check_failed','article_already_claimed']);
 const CREATE="CREATE TABLE IF NOT EXISTS commissioning (test_key TEXT PRIMARY KEY,status TEXT NOT NULL, result_json TEXT)";
 export async function commissioningStatus(env){
@@ -30,19 +31,19 @@ export async function commissionOnce(env,deps={}){
     if(!row||!RETRYABLE.has(row.status))return commissioningStatus(env);
     let previous;
     try{previous=JSON.parse(row.result_json||'{}');}catch{return commissioningStatus(env);}
-    attempt=(Number.isInteger(previous.attempt)&&previous.attempt>0?previous.attempt:1)+1;
+    attempt=previous.diagnosticsVersion===DIAGNOSTICS_VERSION?(Number.isInteger(previous.attempt)&&previous.attempt>0?previous.attempt:1)+1:1;
     if(attempt>MAX_ATTEMPTS)return commissioningStatus(env);
     // Atomic compare-and-set: only one worker can resume a pre-delivery failure.
     const retry=await db.prepare("UPDATE commissioning SET status='checking',result_json=? WHERE test_key=? AND status=? AND result_json IS ?")
-      .bind(JSON.stringify({attempt}),KEY,row.status,row.result_json).run();
+      .bind(JSON.stringify({attempt,diagnosticsVersion:DIAGNOSTICS_VERSION}),KEY,row.status,row.result_json).run();
     if(Number(retry.meta?.changes||0)!==1)return commissioningStatus(env);
   }
   const save=async(status,result={})=>{
-    const data={...result,attempt,maxAttempts:MAX_ATTEMPTS,retryAvailable:RETRYABLE.has(status)&&attempt<MAX_ATTEMPTS};
+    const data={...result,diagnosticsVersion:DIAGNOSTICS_VERSION,attempt,maxAttempts:MAX_ATTEMPTS,retryAvailable:RETRYABLE.has(status)&&attempt<MAX_ATTEMPTS};
     await db.prepare('UPDATE commissioning SET status=?,result_json=? WHERE test_key=?').bind(status,JSON.stringify(data),KEY).run();
     return {status,...data};
   };
-  let claimed=null, gemma=null;
+  let claimed=null, gemma=null, diagnostics={};
   try{
     await initialize(db);
     const {articles}=await (deps.fetchNews||fetchNews)(fetchFn,now,72);
@@ -57,11 +58,22 @@ export async function commissionOnce(env,deps={}){
     }
     if(!picked)return save('no_original_image');
     const {article,image}=picked;
-    // Force only Gemma: the primary model must never mask a backup failure.
-    const model=env.AI_BACKUP_MODEL||BACKUP_MODEL;
-    const draft=await (deps.writePost||writePost)(article,{...env,AI_MODEL:model,AI_BACKUP_MODEL:model},fetchFn,assessArticle(article));
-    if(draft.engine!==model)return save('backup_not_verified');
-    gemma={model,backupVerified:true,source:article.source,imageMode:'publisher',imageMethod:image.method,articleUrl:article.url};
+    const primary=env.AI_MODEL||PRIMARY_MODEL, model=env.AI_BACKUP_MODEL||BACKUP_MODEL;
+    const editorial=assessArticle(article);
+    const check=async(name)=>{
+      try{
+        const draft=await (deps.writePost||writePost)(article,{...env,AI_MODEL:name,AI_BACKUP_MODEL:name},fetchFn,editorial);
+        if(draft.engine!==name)return {verified:false,reason:'wrong_model'};
+        return {verified:true,draft};
+      }catch(e){return {verified:false,error:e?.diagnostics?.[0]||modelError(e)};}
+    };
+    const first=await check(primary);
+    const second=primary===model?{verified:false,reason:'duplicate_model_configuration'}:await check(model);
+    const report=(name,r)=>({model:name,verified:r.verified,...(r.error?{error:r.error}:{}),...(r.reason?{reason:r.reason}:{})});
+    diagnostics={primaryVerified:first.verified,backupVerified:second.verified,primary:report(primary,first),backup:report(model,second),imageFound:true,imageMethod:image.method};
+    if(!first.verified||!second.verified)return save('check_failed',diagnostics);
+    const draft=second.draft;
+    gemma={...diagnostics,model,backupVerified:true,source:article.source,imageMode:'publisher',imageMethod:image.method,articleUrl:article.url};
     const day=dayKey(now,5);
     if(!await claim(db,article,day,now))return save('article_already_claimed',gemma);
     claimed=article.url;
@@ -73,6 +85,6 @@ export async function commissionOnce(env,deps={}){
   }catch(e){
     // A Telegram timeout may mean delivery already occurred. Never retry.
     if(claimed){try{await markFailed(db,claimed);}catch{}}
-    return save(claimed?'delivery_unconfirmed':'check_failed',gemma||{backupVerified:false});
+    return save(claimed?'delivery_unconfirmed':'check_failed',gemma||{...diagnostics,backupVerified:false,error:modelError(e,'commissioning')});
   }
 }
