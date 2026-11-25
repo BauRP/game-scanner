@@ -30,6 +30,8 @@ export function assessArticle(article){
   const combined=(title+' '+body).trim();
   if(title.length<9||!article?.url||!article?.source)return {eligible:false,reason:'missing_source'};
   if(has(title,/\b(sponsored|advertorial|opinion|rumor roundup|roundup of deals|best cheap games)\b/i))return {eligible:false,reason:'promotional_or_opinion'};
+  // Ordinary merchandise announcements are shop ads, not game releases or gaming hardware.
+  if(/\b(?:merch(?:andise)?|plush(?:ies)?|figurines?|collectible(?:s)?|apparel)\b/i.test(title)&&/\b(?:pre[- ]?order|available|shop|store|sale|buy|shipping)\b/i.test(title)&&!/\b(?:gameplay|game update|expansion|game release|new game|trailer)\b/i.test(title))return {eligible:false,reason:'merchandise_promotion'};
   // A free-to-play launch is a release, not a temporary giveaway.
   const newRelease=has(title,/\b(now available|available now|out now|launch(?:es|ed)?|release(?:d| date)?|announc(?:es|ed|ement))\b/i);
   const freeLaunch=newRelease&&has(combined,/\b(free[- ]to[- ]play|f2p)\b/i)&&!has(combined,/\b(free to keep|giveaway|100% off|claim for free|free for a limited time|free trial|free weekend)\b/i);
