@@ -53,6 +53,7 @@ export function extractInlineImages(html,article){
   for(const [tag] of String(html).matchAll(/<img\b[^>]*>/gi)){
     const a=attrs(tag);
     if((a.width&&Number(a.width)<120)||(a.height&&Number(a.height)<80))continue;
+    if(/(?:^|\s)(?:avatar|logo|advertisement|related-post|author-photo)(?:\s|$)/i.test(a.class||''))continue;
     for(const value of [a['data-src'],a['data-lazy-src'],a['data-original'],...srcset(a['data-srcset']||a.srcset),a.src])add(list,value,article);
   }
   return list;
@@ -87,7 +88,7 @@ export function extractImageCandidates(html,article){
     try{inspect(JSON.parse(json));}catch{}
   }
   const body=s.match(/<article\b[^>]*>[\s\S]*?<\/article>/i)?.[0]||s.match(/<main\b[^>]*>[\s\S]*?(?:<\/main>|$)/i)?.[0];
-  if(body)for(const u of extractInlineImages(body,article))add(list,u,article);
+  if(body){const main=body.replace(/<(aside|nav|footer|script)\b[^>]*>[\s\S]*?<\/\1>/gi,' ');for(const u of extractInlineImages(main,article))add(list,u,article);}
   return list;
 }
 export function extractImageFromHtml(html,article){return extractImageCandidates(html,article)[0]||null;}

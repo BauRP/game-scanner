@@ -110,3 +110,16 @@ test('account-wide quota failure does not invoke second model',async()=>{
 test('oversized game description is rejected instead of truncating mid-sentence',()=>{
  assert.throws(()=>parseDraft({headline:'Игра вышла',body:'Описание игровой механики. '.repeat(25)},{...item,gameDetailsRequired:true}),EditorialSkip);
 });
+
+test('partial feed outage releases hour only before delivery',async()=>{
+ const {env,deps,calls}=setup();
+ const result=await runCycle(env,{...deps,fetchNews:async()=>({articles:[],errors:['temporary outage']})});
+ assert.equal(result.status,'feed_unavailable');assert.equal(calls.send,0);
+ assert.equal((await runCycle(env,deps)).status,'sent');assert.equal(calls.send,1);
+ assert.equal((await runCycle(env,deps)).status,'hour_already_reserved');
+});
+test('ambiguous delivery never releases hour even with feed outage',async()=>{
+ const {env,deps}=setup();
+ const result=await runCycle(env,{...deps,fetchNews:async()=>({articles:[item],errors:['outage']}),publishPost:async()=>{throw Error('timeout');}});
+ assert.equal(result.status,'post_failed');assert.equal((await runCycle(env,deps)).status,'hour_already_reserved');
+});
