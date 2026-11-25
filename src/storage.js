@@ -47,3 +47,20 @@ export async function recentTitleKeys(db,now){
   const result=await db.prepare("SELECT title FROM posts WHERE created_at >= ? AND status IN ('sent','processing','failed') ORDER BY created_at DESC LIMIT 100").bind(new Date(now-72*3600000).toISOString()).all();
   return new Set((result.results||[]).map(r=>titleKey(r.title)).filter(Boolean));
 }
+
+export async function recordCycle(db,now,result){
+ if(!db)return;
+ try{
+ await db.prepare("CREATE TABLE IF NOT EXISTS cycle_history (hour_key TEXT PRIMARY KEY, recorded_at TEXT NOT NULL, result_json TEXT NOT NULL)").run();
+ const data={status:String(result.status||'unknown'),...(result.source?{source:result.source}:{}),...(result.category?{category:result.category}:{}),...(result.imageMode?{imageMode:result.imageMode}:{}),...(result.engine?{engine:result.engine}:{}),...(Number.isInteger(result.messageId)?{messageId:result.messageId}:{}),...(Number.isInteger(result.failedFeeds)?{failedFeeds:result.failedFeeds}:{})};
+ await db.prepare("INSERT INTO cycle_history(hour_key,recorded_at,result_json) VALUES (?,?,?) ON CONFLICT(hour_key) DO UPDATE SET recorded_at=excluded.recorded_at,result_json=excluded.result_json WHERE json_extract(cycle_history.result_json,'$.status')!='sent' AND json_extract(excluded.result_json,'$.status')!='hour_already_reserved'").bind(hourKey(now),new Date().toISOString(),JSON.stringify(data)).run();
+ }catch{console.warn('Cycle history unavailable');}
+}
+export async function cycleHistory(db){
+ if(!db)return {available:false};
+ try{
+ const row=await db.prepare("SELECT recorded_at,result_json FROM cycle_history ORDER BY hour_key DESC LIMIT 1").first();
+ const sent=await db.prepare("SELECT created_at,telegram_message_id FROM posts WHERE status='sent' ORDER BY created_at DESC LIMIT 1").first();
+ return {available:true,lastCycle:row?{recordedAt:row.recorded_at,...JSON.parse(row.result_json)}:null,lastPublication:sent?{createdAt:sent.created_at,messageId:sent.telegram_message_id}:null};
+ }catch{return {available:false};}
+}
