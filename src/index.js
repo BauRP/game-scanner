@@ -2,7 +2,7 @@ import {commissionOnce,commissioningStatus} from './commissioning.js';
 import {photoCandidates} from './photo-selection.js';
 import {readQuality,saveQuality,qualityStatus} from './source-quality.js';
 import {fetchNews} from './news.js';
-import {initialize,dayKey,alreadyAttempted,publishedCount,claim,markSent,markFailed,releaseClaim,reserveHour,recentTitleKeys,titleKey,recordCycle,cycleHistory,releaseHour,isSimilarTitle,recentCategories} from './storage.js';
+import {initialize,dayKey,alreadyAttempted,publishedCount,claim,markSent,markFailed,releaseClaim,reserveHour,recentTitleKeys,titleKey,recordCycle,cycleHistory,releaseHour,isSimilarTitle,recentCategories,prepareTitleIndex} from './storage.js';
 import {writePost,EditorialSkip} from './ai.js';
 import {previewHtml,previewStatus,createAiPreview,refreshPreviewImage} from './preview.js';
 import {usageStatus} from './usage.js';
@@ -33,18 +33,22 @@ export async function runCycle(env,deps={}){
   const usage=await usageStatus(env.DB);
   if(usage.quotaExhausted||usage.estimatedNeurons>=9000)return {status:'daily_ai_quota',day};
   const previousTitles=await recentTitleKeys(env.DB,now);
+  const titleIndex=prepareTitleIndex(previousTitles);
   const recent=await recentCategories(env.DB,now);
   let news;
   try{news=await (deps.fetchNews||fetchNews)(deps.fetchFn||fetch,now,intVal(env.MAX_ARTICLE_AGE_HOURS,72,1,168));}catch{await releaseHour(env.DB,now);return {status:'feed_unavailable',day};}
   const {articles,errors=[],feedStats=[]}=news;
   const checks=[],quality=await readQuality(env.DB);
   let draftsTried=0;
+  const checkedArticles=new Set();
   try{
-  for await(const selection of photoCandidates(articles.filter(a=>!previousTitles.has(titleKey(a.title))&&!isSimilarTitle(a.title,previousTitles)),{fetchFn:deps.fetchFn||fetch,findImage:deps.findArticleImage,wasAttempted:url=>alreadyAttempted(env.DB,url),useImages:env.USE_SOURCE_IMAGES==='true',quality,checks,recentCategories:recent})){
+  for await(const selection of photoCandidates(articles.filter(a=>!previousTitles.has(titleKey(a.title))&&!isSimilarTitle(a.title,titleIndex)),{fetchFn:deps.fetchFn||fetch,findImage:deps.findArticleImage,wasAttempted:url=>alreadyAttempted(env.DB,url),useImages:env.USE_SOURCE_IMAGES==='true',quality,checks,recentCategories:recent})){
     const {article:item,editorial}=selection;
     if(draftsTried>=2)break;
     // Never start delivery in a different hour from the reservation.
     if((!deps.now||deps.clock)&&Math.floor(clock()/3600000)!==Math.floor(now/3600000))return {status:'hour_expired',day};
+    if(checkedArticles.has(item.url))continue;
+    checkedArticles.add(item.url);
     if(!await claim(env.DB,item,day,now))continue;
     draftsTried++;
     let draft;
