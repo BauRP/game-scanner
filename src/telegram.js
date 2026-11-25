@@ -60,7 +60,7 @@ export async function publishPost(draft,article,env,fetchFn=fetch,selection=unde
       }catch(e){
         // HTTP 400 proves the image was rejected and not published.
         // Unknown network/5xx failures are NEVER retried to avoid duplicate posts.
-        if(!(e instanceof TelegramApiError&&e.status===400))throw e;
+        if(!(e instanceof TelegramApiError&&e.status===400&&/photo|image|file|media/i.test(e.message)))throw e;
         if(selection?.check)selection.check.accepted=false;
         console.warn('Source image rejected; using original Game Scanner cover');
       }
