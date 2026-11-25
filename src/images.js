@@ -21,6 +21,9 @@ export function trustedImageUrl(value,article){
     /(?:^|\.)localhost$|(?:^|\.)local$|(?:^|\.)internal$/i.test(image.hostname))return null;
   if(story.protocol!=='https:'||!PUBLISHER_HOSTS[article.source]?.some(d=>allowed(story.hostname,d)))return null;
   if(!MEDIA_HOSTS[article.source]?.some(d=>allowed(image.hostname,d)))return null;
+  // An RSS enclosure can accidentally point to the article itself, which is HTML,
+  // not a photo. Never submit the article URL to Telegram sendPhoto.
+  if(image.origin===story.origin&&image.pathname.replace(/\/$/,'')===story.pathname.replace(/\/$/,''))return null;
   image.hash='';
   return image.href;
 }

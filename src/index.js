@@ -2,7 +2,7 @@ import {fetchNews} from './news.js';
 import {initialize,dayKey,alreadyAttempted,publishedCount,claim,markSent,markFailed,releaseClaim} from './storage.js';
 import {writePost,EditorialSkip} from './ai.js';
 import {assessArticle} from './editorial.js';
-import {previewHtml,previewStatus,createAiPreview} from './preview.js';
+import {previewHtml,previewStatus,createAiPreview,refreshPreviewImage} from './preview.js';
 import {publishPost,telegramCall} from './telegram.js';
 const intVal=(value,fallback,min,max)=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
 export async function runCycle(env,deps={}){
@@ -85,6 +85,9 @@ export default {
   },
   async fetch(request,env){
     const url=new URL(request.url);
+    if(url.pathname==='/ai-preview-image'&&request.method==='POST'){
+      return refreshPreviewImage(env);
+    }
     if(url.pathname==='/ai-preview-status'&&request.method==='GET'){
       return Response.json(await previewStatus(env),{headers:{'Cache-Control':'no-store'}});
     }

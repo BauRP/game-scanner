@@ -47,6 +47,9 @@ function mediaUrl(xml) {
     if(type&&!/^image\//i.test(type))continue;
     if(medium&&medium.toLowerCase()!=='image')continue;
     const url=attr(tag,'url');
+    // Untyped RSS enclosures are sometimes links to HTML articles, not images.
+    // For an untyped enclosure accept only filenames resembling actual image files.
+    if(/^<enclosure\b/i.test(tag)&&!type&&!/\.(?:jpe?g|png|gif|webp|avif)(?:[?#]|$)/i.test(url))continue;
     if(url)return url;
   }
   return '';

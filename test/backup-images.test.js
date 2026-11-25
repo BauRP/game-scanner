@@ -58,3 +58,21 @@ test('ambiguous network error never retries',async()=>{
  await assert.rejects(publishPost(JSON.parse(good.response),item,{TELEGRAM_BOT_TOKEN:'fake',TELEGRAM_CHAT_ID:'@gamescannews',USE_SOURCE_IMAGES:'true'},f),/timeout/);
  assert.equal(count,1);
 });
+
+test('RSS article URL cannot be used as a Telegram photo',async()=>{
+ const bad={...item,image:item.url};
+ assert.equal(trustedImageUrl(bad.image,bad),null);
+ assert.equal(trustedImageUrl(item.url+'?share=1',item),null);
+ let photoAttempts=0;
+ const fetchFn=async(url,opt)=>{
+   if(url===bad.url)return new Response('<html><head><meta property="og:image" content="https://www.gematsu.com/images/doom.jpg"></head></html>',{headers:{'content-type':'text/html'}});
+   photoAttempts++;return Response.json({ok:true,result:{message_id:21}});
+ };
+ const id=await publishPost(JSON.parse(good.response),bad,{TELEGRAM_BOT_TOKEN:'fake',TELEGRAM_CHAT_ID:'@gamescannews',USE_SOURCE_IMAGES:'true'},fetchFn);
+ assert.equal(id,21);assert.equal(photoAttempts,1);
+});
+test('company names must be grounded in the source',()=>{
+ const a={...item,title:'Bandai Card Games announces Digimon Alysion',description:'Bandai Card Games announced the mobile card game.'};
+ assert.throws(()=>parseDraft({response:'{"headline":"Digimon Alysion","body":"Компания Bandai Namco сообщила о запуске."}'},a),EditorialSkip);
+ assert.doesNotThrow(()=>parseDraft({response:'{"headline":"Digimon Alysion","body":"Компания Bandai Card Games сообщила о запуске."}'},a));
+});
