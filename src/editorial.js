@@ -37,7 +37,7 @@ export function assessArticle(article){
   const freeLaunch=newRelease&&has(combined,/\b(free[- ]to[- ]play|f2p)\b/i)&&!has(combined,/\b(free to keep|giveaway|100% off|claim for free|free for a limited time|free trial|free weekend)\b/i);
   const trial=has(combined,/\b(free demo|demo available|free trial|free weekend|weekend trial|play for free (?:this|until)|open beta|closed beta|playtest)\b/i);
   const keep=has(combined,/\b(free to keep|keep forever|claim for free|100% off)\b/i);
-  const rumor=has(combined,RUMOR);
+  const rumor=has(title,RUMOR)||has(body,/\b(?:reportedly|allegedly|unconfirmed|according to (?:a |an )?(?:leak|insider)|rumou?r suggests)\b/i);
   const subscription=has(combined,/\b(game pass|playstation plus|ps plus|ea play|ubisoft\+|subscription|prime gaming)\b/i);
   const expansion=has(title,/\b(dlc|expansion|add-on|downloadable content|skin pack)\b/i);
   const earlyAccess=has(title,/\b(early access|pre[- ]?order|delayed|postponed|release date)\b/i);
@@ -45,7 +45,7 @@ export function assessArticle(article){
   if(expired&&has(combined,GIVEAWAY))return {eligible:false,reason:'expired_giveaway'};
   if(subscription&&has(combined,GIVEAWAY)&&!keep&&!freeLaunch)return {eligible:true,category:CATEGORIES[rumor?14:1],rumor,accessType:'subscription'};
   if(expansion&&has(combined,GIVEAWAY)&&!freeLaunch)return {eligible:true,category:CATEGORIES[rumor?14:4],rumor,accessType:'addon'};
-  if(earlyAccess&&!trial&&!keep)return {eligible:true,category:CATEGORIES[rumor?14:2],rumor,accessType:'pre_release'};
+  if(earlyAccess&&!trial&&!keep&&!has(title,/\b(?:leaves|exits|out of|ends) early access\b/i))return {eligible:true,category:CATEGORIES[rumor?14:2],rumor,accessType:'pre_release'};
   // Time-limited access is not ownership, even when a headline says "free game".
   if(trial&&!keep)return {eligible:true,category:CATEGORIES[rumor?14:12],rumor,accessType:'trial'};
   if(has(combined,GIVEAWAY)&&!freeLaunch){
@@ -67,6 +67,6 @@ export function assessArticle(article){
   else if(has(combined,/\b(release date|launches on|launch date|out now|launches today|available now|now available|released today)\b/i))c=2;
   else if(has(combined,/\b(announc(?:es|ed|ement)?|unveil(?:s|ed)?|reveal(?:s|ed)?|debut trailer|new trailer|gameplay trailer)\b/i))c=3;
   else if(has(combined,/\b(gta|counter[- ]strike|cs2|dota 2|minecraft|pokemon|fortnite|call of duty|roblox|elden ring|assassin.s creed)\b/i))c=8;
-  if(has(combined,RUMOR))c=14;
-  return {eligible:true,category:CATEGORIES[c],rumor:has(combined,RUMOR),...(freeLaunch?{accessType:'free_to_play'}:{})};
+  if(rumor)c=14;
+  return {eligible:true,category:CATEGORIES[c],rumor,...(freeLaunch?{accessType:'free_to_play'}:{})};
 }
