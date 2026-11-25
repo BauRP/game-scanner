@@ -17,7 +17,7 @@ function contentText(value){
 function responseText(r,depth=0){
   if(depth>3||r==null)return '';
   if(typeof r==='string')return r;
-  if(typeof r.headline==='string'&&typeof r.body==='string')return JSON.stringify(r);
+  if(r.publish===false||(typeof r.headline==='string'&&typeof r.body==='string'))return JSON.stringify(r);
   const direct=[r.response,r.output_text,r.choices?.[0]?.message?.content,r.choices?.[0]?.text].map(contentText).find(x=>x.trim());
   if(direct)return direct;
   if(Array.isArray(r.output)){
@@ -34,18 +34,20 @@ export function modelError(error,stage='request'){
   if(error instanceof EditorialSkip)return {stage:'editorial',reason:error.message};
   const msg=String(error?.message||error||'');
   const rawCode=error?.code??error?.errors?.[0]?.code??error?.cause?.code;
-  const code=String(rawCode??'').match(/^\d{4}$/)?.[0]||msg.match(/\b(3036|3040|5004|5007|5035|5000|5016|5020)\b/)?.[1];
+  const code=String(rawCode??'').match(/^\d{4}$/)?.[0]||msg.match(/\b(3003|3006|3007|3008|3023|3036|3040|3041|3042|5004|5007|5016|5018|5028|5035|5000|5020)\b/)?.[1];
   const rawStatus=Number(error?.status??error?.statusCode??error?.response?.status);
   const status=Number.isInteger(rawStatus)&&rawStatus>=400&&rawStatus<=599?rawStatus:undefined;
   let reason=stage==='response'?'invalid_json':'request_failed';
   if(stage==='request'){
     if(code==='3036'||/daily free allocation|neurons|quota/i.test(msg))reason='daily_quota';
-    else if(code==='5035'||status===403)reason='access_denied';
-    else if(code==='5007'||/no such model|model not found/i.test(msg))reason='model_not_found';
+    else if(code==='5035')reason='paid_plan_required';
+    else if(['3023','3041','5016','5018'].includes(code)||status===403)reason='access_denied';
+    else if(code==='5028'||status===410)reason='model_deprecated';
+    else if(code==='3042'||code==='5007'||/no such model|model not found/i.test(msg))reason='model_not_found';
     else if(code==='3040'||/capacity|overloaded/i.test(msg))reason='capacity';
     else if(status===429||/rate limit/i.test(msg))reason='rate_limited';
-    else if(status===400||/invalid (?:input|parameter|request)|validation/i.test(msg))reason='invalid_request';
-    else if(/timeout|timed out|abort/i.test(msg))reason='timeout';
+    else if(['3003','3006','5004'].includes(code)||status===400||/invalid (?:input|parameter|request)|validation/i.test(msg))reason='invalid_request';
+    else if(['3007','3008'].includes(code)||status===408||/timeout|timed out|abort/i.test(msg))reason='timeout';
   }
   return {stage,reason,...(code?{code:Number(code)}:{}),...(status?{status}:{})};
 }
@@ -92,7 +94,7 @@ export async function writeWithModel(article,env,model,editorial={}){
       rumor:Boolean(editorial.rumor),title:article.title,excerpt:article.description||''})}
   ];
   // Keep the known-working GPT-OSS request unchanged. Gemma uses its current completion budget.
-  const options=model.includes('gemma-4')?{messages,temperature:0.15,max_completion_tokens:2048}:{messages,temperature:0.15,max_tokens:650};
+  const options=model.includes('gemma-4')?{messages,temperature:0.15,max_completion_tokens:2048,chat_template_kwargs:{enable_thinking:false}}:{messages,temperature:0.15,max_tokens:650};
   if(model.includes('gpt-oss'))options.reasoning_effort='low';
   let result;
   try{
@@ -102,7 +104,7 @@ export async function writeWithModel(article,env,model,editorial={}){
     }
   }catch(e){throw new ModelFailure(modelError(e,'request'));}
   try{
-    if(result?.choices?.[0]?.finish_reason==='length')throw new ModelFailure({stage:'response',reason:'output_truncated'});
+    if((result?.choices?.[0]?.finish_reason||result?.result?.choices?.[0]?.finish_reason)==='length')throw new ModelFailure({stage:'response',reason:'output_truncated'});
     return {...parseDraft(result,article,editorial),engine:model};
   }catch(e){throw new ModelFailure(modelError(e,'response'));}
 }
