@@ -1,21 +1,22 @@
+import {requireRussianDraft} from './translator.js';
 import {findArticleImage} from './images.js';
 import {coverPngBytes} from './cover.js';
+import {sourceByName} from './sources.js';
 export function composePost(draft,article){
   const headline=String(draft.headline||'').replace(/[\r\n]/g,' ').trim().slice(0,85);
   const body=String(draft.body||'').replace(/[\r\n]/g,' ').trim().slice(0,420);
-  const source=String(article.source||'').replace(/[\r\n]/g,' ').trim().slice(0,50);
-  const url=String(article.url||'');
-  if(!headline||!body||!source||!/^https:\/\//.test(url)||url.length>450)throw new Error('Telegram caption lacks verifiable source');
-  const ending='\n\nИсточник: '+source+'\n'+url;
-  const intro='🎮 '+headline+'\n\n';
-  const maxBody=Math.min(420,1024-intro.length-ending.length);
-  if(maxBody<35)throw new Error('Article link leaves no room for a caption');
-  return intro+body.slice(0,maxBody)+ending;
+  // Keep the original URL internally; the reader sees only headline and editorial text.
+  const publisher=sourceByName(article?.source);
+  let url;
+  try{url=new URL(article?.url);}catch{throw new Error('Telegram caption lacks verifiable source');}
+  if(!headline||!body||!publisher||url.protocol!=='https:'||url.username||url.password||url.port||!publisher.hosts.includes(url.hostname))throw new Error('Telegram caption lacks verifiable source');
+  if(/https?:\/\/|www\.|(?:^|\s)источник\s*:/i.test(headline+' '+body))throw new Error('Unexpected public source footer');
+  return '🎮 '+headline+'\n\n'+body;
 }
 export class TelegramApiError extends Error{
   constructor(method,status,description){
     super('Telegram '+method+' HTTP '+status+': '+String(description||'Unknown error').slice(0,160));
-    this.name='TelegramApiError';this.status=status;
+    this.name='TelegramApiError';this.status=status;this.description=String(description||'');
   }
 }
 async function callApi(token,method,options,fetchFn){
@@ -39,15 +40,17 @@ export async function sendCoverPhoto(caption,env,fetchFn=fetch){
   return r.message_id;
 }
 export async function sendPublisherPhoto(draft,article,image,env,fetchFn=fetch){
-  if(!image?.bytes?.length||!['image/png','image/jpeg'].includes(image.mime))throw new Error('Validated original image required');
+  requireRussianDraft(draft);
+  if(!image?.bytes?.length||!['image/png','image/jpeg','image/webp'].includes(image.mime))throw new Error('Validated original image required');
   const data=new FormData();
   data.append('chat_id',env.TELEGRAM_CHAT_ID);
   data.append('caption',composePost(draft,article));
-  data.append('photo',new Blob([image.bytes],{type:image.mime}),image.mime==='image/png'?'news.png':'news.jpg');
+  data.append('photo',new Blob([image.bytes],{type:image.mime}),image.mime==='image/png'?'news.png':image.mime==='image/webp'?'news.webp':'news.jpg');
   const sent=await callApi(env.TELEGRAM_BOT_TOKEN,'sendPhoto',{body:data},fetchFn);
   return sent.message_id;
 }
 export async function publishPost(draft,article,env,fetchFn=fetch,selection=undefined){
+  requireRussianDraft(draft);
   const caption=composePost(draft,article);
   // Publisher photos may be copyrighted: permission must be considered by channel owner.
   if(env.USE_SOURCE_IMAGES==='true'){
@@ -60,7 +63,7 @@ export async function publishPost(draft,article,env,fetchFn=fetch,selection=unde
       }catch(e){
         // HTTP 400 proves the image was rejected and not published.
         // Unknown network/5xx failures are NEVER retried to avoid duplicate posts.
-        if(!(e instanceof TelegramApiError&&e.status===400))throw e;
+        if(!(e instanceof TelegramApiError&&e.status===400&&/photo|image|file|media/i.test(e.description||'')))throw e;
         if(selection?.check)selection.check.accepted=false;
         console.warn('Source image rejected; using original Game Scanner cover');
       }

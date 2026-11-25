@@ -17,7 +17,7 @@ export function trustedImageUrl(value,article){
   return image.href;
 }
 // Try several original images before the branded cover. All network reads are bounded.
-const MAX_HTML=1000000, MAX_IMAGE=8*1024*1024, MAX_CANDIDATES=5;
+const MAX_HTML=750000, MAX_IMAGE=8*1024*1024, MAX_CANDIDATES=5;
 function decodeMeta(value){
   return String(value??'').replace(/&amp;|&quot;|&apos;|&#39;|&lt;|&gt;|&#x[\da-f]+;|&#\d+;/gi,m=>{
     const known={'&amp;':'&','&quot;':'"','&apos;':"'",'&#39;':"'",'&lt;':'<','&gt;':'>'};
@@ -120,7 +120,7 @@ async function boundedFetch(url,article,fetchFn,isImage,deadline){
   for(let hops=0;hops<=2;hops++){
     url=validate(url);if(!url||Date.now()>=deadline)return null;
     const res=await fetchFn(url,{method:'GET',redirect:'manual',
-      headers:{Accept:isImage?'image/jpeg,image/png,image/*;q=0.8':'text/html,application/xhtml+xml','User-Agent':'GameScannerNewsBot/1.0',...(isImage?{Referer:article.url}:{})},
+      headers:{Accept:isImage?'image/jpeg,image/png,image/webp,image/*;q=0.5':'text/html,application/xhtml+xml','User-Agent':'GameScannerNewsBot/1.0',...(isImage?{Referer:article.url}:{})},
       signal:AbortSignal.timeout(Math.max(1,Math.min(6500,deadline-Date.now())))});
     if([301,302,303,307,308].includes(res.status)){
       const next=res.headers.get('location');await res.body?.cancel().catch(()=>{});
@@ -131,7 +131,7 @@ async function boundedFetch(url,article,fetchFn,isImage,deadline){
   }
   return null;
 }
-function fileType(b){
+export function fileType(b){
   if(b.length>=33&&[137,80,78,71,13,10,26,10].every((x,i)=>b[i]===x)&&String.fromCharCode(...b.subarray(12,16))==='IHDR'){
     const view=new DataView(b.buffer,b.byteOffset,b.byteLength),w=view.getUint32(16),h=view.getUint32(20);
     if(w>=120&&h>=80&&w+h<=10000&&Math.max(w/h,h/w)<=20)return 'image/png';
@@ -151,6 +151,22 @@ function fileType(b){
       }
       i+=n;
     }
+  }
+  // WebP RIFF headers: reject animation and dimensions outside Telegram's photo limits.
+  const ascii=(i,n)=>String.fromCharCode(...b.subarray(i,i+n));
+  if(b.length>=30&&ascii(0,4)==='RIFF'&&ascii(8,4)==='WEBP'){
+    const view=new DataView(b.buffer,b.byteOffset,b.byteLength);
+    if(view.getUint32(4,true)+8!==b.length)return null;
+    let w=0,h=0;
+    if(ascii(12,4)==='VP8X'&&view.getUint32(16,true)===10){
+      if(b[20]&2)return null;
+      w=1+b[24]+(b[25]<<8)+(b[26]<<16);h=1+b[27]+(b[28]<<8)+(b[29]<<16);
+    }else if(ascii(12,4)==='VP8 '&&b[23]===157&&b[24]===1&&b[25]===42){
+      w=view.getUint16(26,true)&16383;h=view.getUint16(28,true)&16383;
+    }else if(ascii(12,4)==='VP8L'&&b[20]===47){
+      const bits=view.getUint32(21,true);w=(bits&16383)+1;h=((bits>>>14)&16383)+1;
+    }
+    if(w>=120&&h>=80&&w+h<=10000&&Math.max(w/h,h/w)<=20)return 'image/webp';
   }
   return null;
 }

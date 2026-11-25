@@ -4,9 +4,16 @@ import {rankNews} from './news.js';
 import {qualityBonus} from './source-quality.js';
 
 // A bounded search across several stories before falling back to the branded cover.
-export async function* photoCandidates(articles,{fetchFn=fetch,findImage=findArticleImage,wasAttempted=async()=>false,useImages=true,quality={},checks=[],maxStories=5,maxLookups=12,maxRequests=10}={}){
+export async function* photoCandidates(articles,{fetchFn=fetch,findImage=findArticleImage,wasAttempted=async()=>false,useImages=true,quality={},checks=[],recentCategories=[],maxStories=5,maxLookups=12,maxRequests=10}={}){
  const ranked=rankNews(articles,qualityBonus,quality);
- let requests=0,lookups=0,probes=0,fallback=null;
+ // Soft diversity preference only; no eligible category is blocked.
+ const recent=recentCategories.slice(0,3);
+ if(recent.length>=2&&recent.every(c=>c===recent[0])){
+   const leading=ranked.slice(0,8);
+   leading.sort((a,b)=>Number(assessArticle(a).category===recent[0])-Number(assessArticle(b).category===recent[0]));
+   ranked.splice(0,leading.length,...leading);
+ }
+ let requests=0,lookups=0,probes=0;const fallbacks=[];
  const boundedFetch=(...args)=>{
    if(requests>=maxRequests)throw Error('Photo search budget reached');
    requests++;return fetchFn(...args);
@@ -24,7 +31,7 @@ export async function* photoCandidates(articles,{fetchFn=fetch,findImage=findArt
    const check={source:article.source,...(!limited||image?{found:Boolean(image)}:{})};
    checks.push(check);
    if(image)yield {article,editorial,image,check};
-   else if(!fallback)fallback={article,editorial,image:null};
+   else if(fallbacks.length<2)fallbacks.push({article,editorial,image:null});
  }
- if(fallback)yield fallback;
+ for(const fallback of fallbacks)yield fallback;
 }

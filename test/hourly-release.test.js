@@ -32,7 +32,8 @@ function db(){
        if(!posts.has(args[0])){posts.set(args[0],{status:'processing',title:args[2],created_at:args[3]});changes=1;}
      }else if(sql.startsWith('UPDATE posts SET status')){
        const p=posts.get(args.at(-1));if(p){p.status=sql.includes("'sent'")?'sent':'failed';changes=1;}
-     }else if(sql.startsWith('DELETE FROM posts')){changes=Number(posts.delete(args[0]));}
+     }else if(sql.startsWith('DELETE FROM publication_hours')){changes=Number(hours.delete(args[0]));}
+     else if(sql.startsWith('DELETE FROM posts')){changes=Number(posts.delete(args[0]));}
      else if(sql.startsWith('INSERT INTO source_quality')){changes=1;}
      else throw Error('Unexpected query: '+sql);
      return {meta:{changes}};
@@ -47,7 +48,7 @@ const setup=()=>{
 };
 test('configuration is hourly, enabled, 24 max, and retains commissioning gate',()=>{
  const c=JSON.parse(readFileSync(new URL('../wrangler.jsonc',import.meta.url),'utf8'));
- assert.deepEqual(c.triggers.crons,['0 * * * *']);assert.equal(c.vars.MAX_POSTS_PER_DAY,'24');
+ assert.deepEqual(c.triggers.crons,['0 * * * *','12 * * * *']);assert.equal(c.vars.MAX_POSTS_PER_DAY,'24');
  assert.equal(c.vars.PUBLISH_ENABLED,'true');assert.equal(c.vars.COMMISSION_ONCE,'true');
 });
 test('two simultaneous cycles reserve only one publication hour',async()=>{

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {writeWithModel,writePost,PRIMARY_MODEL,BACKUP_MODEL,modelError} from '../src/ai.js';
 const item={title:'Doom gameplay trailer released',description:'A new gameplay trailer for Doom was released.',source:'Gematsu'};
-const draft={publish:true,headline:'Doom',body:'Представлен новый трейлер игры.'};
+const draft={publish:true,headline:'Трейлер Doom',body:'Представлен новый трейлер игры.'};
 test('Gemma uses model-specific options and reads completion content',async()=>{
  const r=await writeWithModel(item,{AI:{run:async(model,options)=>{
  assert.equal(model,BACKUP_MODEL);assert.equal(options.max_completion_tokens,2048);

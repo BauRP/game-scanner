@@ -40,7 +40,8 @@ export function normalizedUrl(value,allowedHosts) {
 function feedLink(xml) {
   const rss=tag(xml,'link');
   if(rss)return cleanText(rss,2048);
-  return xml.match(/<link\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*\/?\s*>/i)?.[1]||'';
+  const links=[...xml.matchAll(/<link\b[^>]*>/gi)].map(m=>({href:attr(m[0],'href'),rel:attr(m[0],'rel')}));
+  return links.find(l=>l.href&&(!l.rel||l.rel==='alternate'))?.href||'';
 }
 function mediaUrls(xml) {
   const urls=[];
@@ -56,14 +57,15 @@ function mediaUrls(xml) {
   }
   return urls;
 }
-export function parseFeed(xml,source) {
-  const blocks=[...String(xml).matchAll(/<(item|entry)(?:\s[^>]*)?>([\s\S]*?)<\/\1>/gi)].slice(0,MAX_ITEMS_PER_FEED);
+export function parseFeed(xml,source,now=null,maxAgeHours=72) {
+  const blocks=[];for(const hit of String(xml).matchAll(/<(item|entry)(?:\s[^>]*)?>([\s\S]*?)<\/\1>/gi)){blocks.push(hit);if(blocks.length>=MAX_ITEMS_PER_FEED)break;}
   return blocks.map(([, ,block])=>{
     const title=cleanText(tag(block,'title'),160);
     const url=normalizedUrl(feedLink(block),source.hosts);
     const description=cleanText(tag(block,'description')||tag(block,'summary')||tag(block,'content:encoded'),540);
     const rawDate=cleanText(tag(block,'pubDate')||tag(block,'published')||tag(block,'updated'),80);
     const publishedAt=Date.parse(rawDate);
+    if(!url||title.length<=8||!Number.isFinite(publishedAt)||(now!==null&&!eligible({title,publishedAt},now,maxAgeHours)))return null;
     const feedContext=cleanText(tag(block,'content:encoded')||tag(block,'content')||tag(block,'description')||tag(block,'summary'),3200);
     const article={title,url,description,feedContext,publishedAt,source:source.name};
     const candidates=mediaUrls(block).map(u=>trustedImageUrl(u,article)).filter(Boolean);
@@ -73,7 +75,7 @@ export function parseFeed(xml,source) {
     }
     const imageCandidates=[...new Set(candidates)].slice(0,12);
     return {...article,image:imageCandidates[0]||'',imageCandidates};
-  }).filter(item=>item.title.length>8&&item.url&&Number.isFinite(item.publishedAt));
+  }).filter(Boolean);
 }
 export function eligible(item,now,maxAgeHours=72) {
   const age=now-item.publishedAt;
@@ -88,7 +90,7 @@ export function rankNews(items,qualityBonus=()=>0,quality={}) {
     if(/sale|deal|discount|hardware|gift card|coupon/i.test(all))n-=8;
     return n;
   };
-  return [...items].sort((a,b)=>score(b)-score(a));
+  return items.map(a=>({a,score:score(a)})).sort((a,b)=>b.score-a.score).map(x=>x.a);
 }
 export async function fetchNews(fetchFn=fetch,now=Date.now(),maxAgeHours=72) {
   const results=[];
@@ -106,12 +108,12 @@ export async function fetchNews(fetchFn=fetch,now=Date.now(),maxAgeHours=72) {
       if(!next||redirects>=6)throw Error('feed redirect unavailable');
       redirects++;res=await fetchFn(next,options);
     }
-    if(!res.ok)throw new Error(source.name+' HTTP '+res.status);
+    if(!res.ok){await res.body?.cancel().catch(()=>{});throw new Error(source.name+' HTTP '+res.status);}
     const len=Number(res.headers.get('content-length')||0);
     if(len>MAX_FEED_BYTES){await res.body?.cancel().catch(()=>{});throw new Error(source.name+' feed too large');}
     const xml=await articleHtml(res,MAX_FEED_BYTES);
     if(!/<(?:rss|feed|rdf:RDF)\b/i.test(xml)||/<html\b/i.test(xml.slice(0,1000)))throw Error('invalid RSS or Atom response');
-    return parseFeed(xml,source).filter(item=>eligible(item,now,maxAgeHours));
+    return parseFeed(xml,source,now,maxAgeHours);
   })));
   const items=[],errors=[];
   for(let i=0;i<results.length;i++){
@@ -128,14 +130,14 @@ export function needsGameContext(article,editorial={}){
     /\b(now available|out now|launch(?:es|ed)?|release(?:d| date)?|announc(?:es|ed|ement)|unveil(?:s|ed)?|reveal(?:s|ed)?|debut|gameplay trailer|new trailer)\b/i.test(article.title||'');
 }
 export function extractArticleContext(html){
-  const text=String(html).replace(/<(script|style|nav|aside|footer|form|noscript|iframe)\b[^>]*>[\s\S]*?<\/\1>/gi,' ');
+  const text=String(html).replace(/<(script|style|nav|aside|footer|form|noscript|iframe|header)\b[^>]*>[\s\S]*?<\/\1>/gi,' ');
   const main=text.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1]||
     text.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1];
   if(!main)return '';
   const parts=[];
   for(const [,p] of main.matchAll(/<(?:p|li)\b[^>]*>([\s\S]*?)<\/(?:p|li)>/gi)){
     const value=cleanText(p,700);
-    if(value.length<35||/^(?:read more|related|subscribe|advertisement|follow us|sign up|share this|cookie|privacy policy|comments\b)/i.test(value))continue;
+    if(value.length<35||/^(?:read more|related|subscribe|advertisement|follow us|sign up|share this|cookie|privacy policy|comments\b|recommended|you may also like|related articles|affiliate disclosure)/i.test(value))continue;
     if(!parts.includes(value))parts.push(value);
     if(parts.join(' ').length>=3200)break;
   }

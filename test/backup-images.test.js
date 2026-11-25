@@ -36,9 +36,9 @@ test('publisher media URL must be trusted',()=>{
 test('original Game Scanner cover is PNG',()=>{
  assert.deepEqual([...coverPngBytes().slice(0,8)],[137,80,78,71,13,10,26,10]);
 });
-test('Telegram caption includes source link and fits media limit',()=>{
+test('Telegram caption excludes public source link and fits media limit',()=>{
  const s=composePost(JSON.parse(good.response),item);
- assert.ok(s.endsWith(item.url));assert.ok(s.length<=1024);
+ assert.ok(!s.includes(item.url));assert.ok(!s.includes('Источник:'));assert.ok(s.length<=1024);
 });
 test('publisher image is attached using sendPhoto',async()=>{
  const calls=[];const f=async(url,opt)=>{if(url===item.image)return photo();calls.push({url,opt});return Response.json({ok:true,result:{message_id:7}});};
@@ -76,8 +76,8 @@ test('RSS article URL cannot be used as a Telegram photo',async()=>{
 });
 test('company names must be grounded in the source',()=>{
  const a={...item,title:'Bandai Card Games announces Digimon Alysion',description:'Bandai Card Games announced the mobile card game.'};
- assert.throws(()=>parseDraft({response:'{"headline":"Digimon Alysion","body":"Компания Bandai Namco сообщила о запуске."}'},a),EditorialSkip);
- assert.doesNotThrow(()=>parseDraft({response:'{"headline":"Digimon Alysion","body":"Компания Bandai Card Games сообщила о запуске."}'},a));
+ assert.throws(()=>parseDraft({response:'{"headline":"Анонс Digimon Alysion","body":"Компания Bandai Namco сообщила о запуске."}'},a),EditorialSkip);
+ assert.doesNotThrow(()=>parseDraft({response:'{"headline":"Анонс Digimon Alysion","body":"Компания Bandai Card Games сообщила о запуске."}'},a));
 });
 
 test('RSS description and encoded content contribute article image candidates',()=>{

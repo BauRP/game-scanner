@@ -26,14 +26,16 @@ test('freshness and importance ranking',()=>{
   assert.match(rankNews([a,{...a,title:'Free game available now'}])[0].title,/Free game/);
 });
 test('validates JSON from AI',()=>{
-  assert.equal(parseDraft({response:'{"headline":"Новость","body":"Текст"}'}).headline,'Новость');
+  assert.equal(parseDraft({response:'{"headline":"Новость","body":"Короткий текст новости."}'}).headline,'Новость');
   assert.throws(()=>parseDraft({response:'bad output'}));
 });
-test('plain Telegram post cites source and preserves safety',()=>{
+test('plain Telegram post omits source footer while validating original',()=>{
   const article=parseFeed(xml,source)[0];
-  const txt=composePost({headline:'<b>News</b>',body:cleanText('<script>bad()</script>OK')},article);
-  assert.ok(txt.includes('Источник: Gematsu'));
-  assert.ok(txt.includes('https://www.gematsu.com/'));
+  const txt=composePost({headline:'Новая игра',body:cleanText('<script>bad()</script>Стала известна дата релиза.')},article);
+  assert.equal(txt,'🎮 Новая игра\n\nСтала известна дата релиза.');
+  assert.ok(!txt.includes('Источник:'));
+  assert.ok(!txt.includes('https://'));
+  assert.throws(()=>composePost({headline:'Новая игра',body:'Стала известна дата релиза.'},{...article,url:'https://evil.test/'}),/verifiable source/);
   assert.ok(!txt.includes('bad()'));
 });
 test('Kazakhstan daily cutoff',()=>{

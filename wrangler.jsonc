@@ -6,7 +6,7 @@
   "workers_dev": true,
   "ai": { "binding": "AI" },
   "d1_databases": [{ "binding": "DB" }],
-  "triggers": { "crons": ["0 * * * *"] },
+  "triggers": { "crons": ["0 * * * *", "12 * * * *"] },
   "vars": {
     "PUBLISH_ENABLED": "true",
     "COMMISSION_ONCE": "true",
