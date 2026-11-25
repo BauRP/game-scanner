@@ -1,5 +1,5 @@
 import {extractInlineImages,trustedImageUrl} from './images.js';
-import { SOURCES } from './sources.js';
+import { SOURCES, FEEDS, sourceByName } from './sources.js';
 
 const MAX_FEED_BYTES = 750000;
 const MAX_ITEMS_PER_FEED = 20;
@@ -82,7 +82,7 @@ export function eligible(item,now,maxAgeHours=72) {
 export function rankNews(items) {
   const score=(a)=>{
     const all=(a.title+' '+a.description).toLowerCase();
-    let n=a.publishedAt/3600000;
+    let n=a.publishedAt/3600000+(sourceByName(a.source)?.priority||0)+(a.imageCandidates?.length||a.image?6:0);
     if(/free (game|games)|free to keep|free-to-play|бесплатн|giveaway|available free/i.test(all))n+=24;
     if(/steam|epic games|pc release|gameplay|trailer|release date|update|announc|launch|playstation/i.test(all))n+=5;
     if(/sale|deal|discount|hardware|gift card|coupon/i.test(all))n-=8;
@@ -91,7 +91,8 @@ export function rankNews(items) {
   return [...items].sort((a,b)=>score(b)-score(a));
 }
 export async function fetchNews(fetchFn=fetch,now=Date.now(),maxAgeHours=72) {
-  const results=await Promise.allSettled(SOURCES.map(async source=>{
+  const results=[];
+  for(let i=0;i<FEEDS.length;i+=4)results.push(...await Promise.allSettled(FEEDS.slice(i,i+4).map(async source=>{
     const res=await fetchFn(source.url,{
       headers:{'Accept':'application/rss+xml, application/atom+xml, application/xml, text/xml','User-Agent':'GameScannerNewsBot/1.0'},
       signal:AbortSignal.timeout(9000)
@@ -100,15 +101,15 @@ export async function fetchNews(fetchFn=fetch,now=Date.now(),maxAgeHours=72) {
     const len=Number(res.headers.get('content-length')||0);
     if(len>MAX_FEED_BYTES)throw new Error(source.name+' feed too large');
     return parseFeed((await res.text()).slice(0,MAX_FEED_BYTES),source).filter(item=>eligible(item,now,maxAgeHours));
-  }));
+  })));
   const items=[],errors=[];
   for(let i=0;i<results.length;i++){
     if(results[i].status==='fulfilled')items.push(...results[i].value);
-    else errors.push(SOURCES[i].name+': '+String(results[i].reason?.message||'unavailable').slice(0,120));
+    else errors.push(FEEDS[i].name+': '+String(results[i].reason?.message||'unavailable').slice(0,120));
   }
   const unique=new Map();
   for(const item of rankNews(items))if(!unique.has(item.url))unique.set(item.url,item);
-  return {articles:[...unique.values()],errors};
+  return {articles:[...unique.values()],errors,feedStats:FEEDS.map((f,i)=>({source:f.name,ok:results[i].status==='fulfilled',articles:results[i].value?.length||0,withImage:results[i].value?.filter(a=>a.imageCandidates.length).length||0}))};
 }
 
 export function needsGameContext(article,editorial={}){
