@@ -8,6 +8,7 @@ export function combineQuality(previous={},feeds=[],checks=[]){
  const result={...previous};
  for(const {source,ok,articles,withImage} of feeds){
    const v=result[source]={...(result[source]||{})};
+   v.lastFeedOk=Boolean(ok);v.lastFeedCheckAt=new Date().toISOString();
    v.feedChecks=(v.feedChecks||0)+1;v.feedOk=(v.feedOk||0)+Number(ok);
    v.articles=(v.articles||0)+articles;v.withImage=(v.withImage||0)+withImage;
  }
@@ -19,10 +20,12 @@ export function combineQuality(previous={},feeds=[],checks=[]){
  return result;
 }
 export function qualityBonus(v){
- if(!v||v.photoChecks<3||!v.photoChecks)return 0;
+ if(!v)return 0;
+ const feedPenalty=v.feedChecks>=3?Math.round((v.feedOk/v.feedChecks-1)*4):0;
+ if(!v.photoChecks||v.photoChecks<3)return feedPenalty;
  const rate=(v.photoFound+2)/(v.photoChecks+4);
  const upload=v.uploadChecks>=3?(v.uploadOk+2)/(v.uploadChecks+4):0.5;
- return Math.round((rate-0.5)*12+(upload-0.5)*6);
+ return feedPenalty+Math.round((rate-0.5)*12+(upload-0.5)*6);
 }
 export async function saveQuality(db,feeds,checks){
  if(!db||(!feeds.length&&!checks.length))return;
