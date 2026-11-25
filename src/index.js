@@ -1,4 +1,6 @@
 import {commissionOnce,commissioningStatus} from './commissioning.js';
+import {photoCandidates} from './photo-selection.js';
+import {readQuality,saveQuality,qualityStatus} from './source-quality.js';
 import {fetchNews} from './news.js';
 import {initialize,dayKey,alreadyAttempted,publishedCount,claim,markSent,markFailed,releaseClaim} from './storage.js';
 import {writePost,EditorialSkip} from './ai.js';
@@ -18,11 +20,11 @@ export async function runCycle(env,deps={}){
   const max=intVal(env.MAX_POSTS_PER_DAY,8,1,10);
   await initialize(env.DB);
   if(await publishedCount(env.DB,day)>=max)return {status:'daily_limit',day};
-  const {articles,errors}=await (deps.fetchNews||fetchNews)(deps.fetchFn||fetch,now,intVal(env.MAX_ARTICLE_AGE_HOURS,72,1,168));
-  for(const item of articles){
-    const editorial=assessArticle(item);
-    if(!editorial.eligible)continue;
-    if(await alreadyAttempted(env.DB,item.url))continue;
+  const {articles,errors,feedStats=[]}=await (deps.fetchNews||fetchNews)(deps.fetchFn||fetch,now,intVal(env.MAX_ARTICLE_AGE_HOURS,72,1,168));
+  const checks=[],quality=await readQuality(env.DB);
+  try{
+  for await(const selection of photoCandidates(articles,{fetchFn:deps.fetchFn||fetch,findImage:deps.findArticleImage,wasAttempted:url=>alreadyAttempted(env.DB,url),useImages:env.USE_SOURCE_IMAGES==='true',quality,checks})){
+    const {article:item,editorial}=selection;
     if(!await claim(env.DB,item,day,now))continue;
     let draft;
     try{
@@ -38,7 +40,7 @@ export async function runCycle(env,deps={}){
       return {status:'ai_unavailable',day};
     }
     try{
-      const messageId=await (deps.publishPost||publishPost)(draft,item,env,deps.fetchFn||fetch);
+      const messageId=await (deps.publishPost||publishPost)(draft,item,env,deps.fetchFn||fetch,selection);
       await markSent(env.DB,item.url,messageId);
       return {status:'sent',source:item.source,engine:draft.engine,category:editorial.category,day};
     }catch(e){
@@ -50,6 +52,7 @@ export async function runCycle(env,deps={}){
   }
   if(errors.length)console.warn('Feeds unavailable:',errors.join(' | '));
   return {status:articles.length?'no_new_articles':'no_fresh_articles',failedFeeds:errors.length,day};
+  }finally{await saveQuality(env.DB,feedStats,checks);}
 }
 
 const TEST_MESSAGE = '🎮 Game Scanner\n\n✅ Тестовая публикация! Бот успешно отправил сообщение в наш Telegram-канал.\n\nЭто только проверка связи. Автоматическая публикация игровых новостей пока выключена.';
@@ -93,6 +96,7 @@ export default {
   },
   async fetch(request,env){
     const url=new URL(request.url);
+    if(url.pathname==='/source-quality'&&request.method==='GET')return Response.json(await qualityStatus(env.DB),{headers:{'Cache-Control':'no-store'}});
     if(url.pathname==='/commissioning-status'&&request.method==='GET'){
       return Response.json(await commissioningStatus(env),{headers:{'Cache-Control':'no-store'}});
     }
