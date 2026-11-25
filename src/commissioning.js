@@ -6,6 +6,8 @@ import {sendPublisherPhoto} from './telegram.js';
 import {initialize,dayKey,alreadyAttempted,claim,markSent,markFailed} from './storage.js';
 
 const KEY='original-photo-gemma-20261125';
+const MAX_ATTEMPTS=3;
+const RETRYABLE=new Set(['no_original_image','backup_not_verified','check_failed','article_already_claimed']);
 const CREATE="CREATE TABLE IF NOT EXISTS commissioning (test_key TEXT PRIMARY KEY,status TEXT NOT NULL, result_json TEXT)";
 export async function commissioningStatus(env){
   if(!env.DB)return {status:'missing_database'};
@@ -22,10 +24,23 @@ export async function commissionOnce(env,deps={}){
   const db=env.DB,fetchFn=deps.fetchFn||fetch,now=deps.now??Date.now();
   await db.prepare(CREATE).run();
   const lock=await db.prepare("INSERT OR IGNORE INTO commissioning(test_key,status) VALUES (?,'checking')").bind(KEY).run();
-  if(Number(lock.meta?.changes||0)!==1)return commissioningStatus(env);
+  let attempt=1;
+  if(Number(lock.meta?.changes||0)!==1){
+    const row=await db.prepare('SELECT status,result_json FROM commissioning WHERE test_key=?').bind(KEY).first();
+    if(!row||!RETRYABLE.has(row.status))return commissioningStatus(env);
+    let previous;
+    try{previous=JSON.parse(row.result_json||'{}');}catch{return commissioningStatus(env);}
+    attempt=(Number.isInteger(previous.attempt)&&previous.attempt>0?previous.attempt:1)+1;
+    if(attempt>MAX_ATTEMPTS)return commissioningStatus(env);
+    // Atomic compare-and-set: only one worker can resume a pre-delivery failure.
+    const retry=await db.prepare("UPDATE commissioning SET status='checking',result_json=? WHERE test_key=? AND status=? AND result_json IS ?")
+      .bind(JSON.stringify({attempt}),KEY,row.status,row.result_json).run();
+    if(Number(retry.meta?.changes||0)!==1)return commissioningStatus(env);
+  }
   const save=async(status,result={})=>{
-    await db.prepare('UPDATE commissioning SET status=?,result_json=? WHERE test_key=?').bind(status,JSON.stringify(result),KEY).run();
-    return {status,...result};
+    const data={...result,attempt,maxAttempts:MAX_ATTEMPTS,retryAvailable:RETRYABLE.has(status)&&attempt<MAX_ATTEMPTS};
+    await db.prepare('UPDATE commissioning SET status=?,result_json=? WHERE test_key=?').bind(status,JSON.stringify(data),KEY).run();
+    return {status,...data};
   };
   let claimed=null, gemma=null;
   try{
