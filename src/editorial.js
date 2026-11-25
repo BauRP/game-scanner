@@ -44,7 +44,7 @@ export function assessArticle(article){
   const exitsEarlyAccess=has(title,/\b(?:leaves|exits|out of|ends|graduat(?:es|ed|ing) from) early access\b/i);
   const expired=has(combined,/\b(giveaway (?:has )?ended|offer (?:has )?expired|no longer free|deal (?:has )?ended)\b/i);
   if(expired&&has(combined,GIVEAWAY))return {eligible:false,reason:'expired_giveaway'};
-  if(subscription&&has(combined,GIVEAWAY)&&!keep&&!freeLaunch)return {eligible:true,category:CATEGORIES[rumor?14:1],rumor,accessType:'subscription'};
+  if(subscription&&has(combined,GIVEAWAY)&&!freeLaunch&&(!keep||has(combined,/\b(?:subscription required|active subscription|requires (?:an? )?(?:active )?subscription)\b/i)))return {eligible:true,category:CATEGORIES[rumor?14:1],rumor,accessType:'subscription'};
   if(expansion&&has(combined,GIVEAWAY)&&!freeLaunch)return {eligible:true,category:CATEGORIES[rumor?14:4],rumor,accessType:'addon'};
   if(earlyAccess&&!trial&&!keep&&!exitsEarlyAccess)return {eligible:true,category:CATEGORIES[rumor?14:2],rumor,accessType:'pre_release'};
   // Time-limited access is not ownership, even when a headline says "free game".
