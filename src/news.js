@@ -57,7 +57,7 @@ function mediaUrls(xml) {
   return urls;
 }
 export function parseFeed(xml,source) {
-  const blocks=[...String(xml).matchAll(/<(item|entry)(?:\s[^>]*)?>([\s\S]*?)<\/\1>/gi)].slice(0,MAX_ITEMS_PER_FEED);
+  const blocks=[];for(const hit of String(xml).matchAll(/<(item|entry)(?:\s[^>]*)?>([\s\S]*?)<\/\1>/gi)){blocks.push(hit);if(blocks.length>=MAX_ITEMS_PER_FEED)break;}
   return blocks.map(([, ,block])=>{
     const title=cleanText(tag(block,'title'),160);
     const url=normalizedUrl(feedLink(block),source.hosts);
@@ -106,7 +106,7 @@ export async function fetchNews(fetchFn=fetch,now=Date.now(),maxAgeHours=72) {
       if(!next||redirects>=6)throw Error('feed redirect unavailable');
       redirects++;res=await fetchFn(next,options);
     }
-    if(!res.ok)throw new Error(source.name+' HTTP '+res.status);
+    if(!res.ok){await res.body?.cancel().catch(()=>{});throw new Error(source.name+' HTTP '+res.status);}
     const len=Number(res.headers.get('content-length')||0);
     if(len>MAX_FEED_BYTES){await res.body?.cancel().catch(()=>{});throw new Error(source.name+' feed too large');}
     const xml=await articleHtml(res,MAX_FEED_BYTES);
