@@ -92,7 +92,7 @@ export async function runCycle(env,deps={}){
   // No Telegram call was made. Partial feed failure can justify a bounded second attempt.
   if(errors.length){await releaseHour(env.DB,now);return {status:'feed_unavailable',failedFeeds:errors.length,rejected,externalRequests,day};}
   // An empty successful feed scan made no delivery attempt. Permit the existing :12 retry.
-  if(!articles.length)await releaseHour(env.DB,now);
+  if(!articles.length||(!rejected&&draftsTried===0))await releaseHour(env.DB,now);
   return {status:rejected?'editorial_rejected':articles.length?'no_new_articles':'no_fresh_articles',failedFeeds:0,rejected,externalRequests,day};
   }finally{await saveQuality(env.DB,feedStats,checks);}
 }
@@ -137,7 +137,7 @@ export default {
     // Do not replay delayed triggers from an already elapsed hour.
     if(Number.isFinite(event?.scheduledTime)&&Math.floor(event.scheduledTime/3600000)!==Math.floor(now/3600000))return;
     const work=(async()=>{
-      if(retry){const history=await cycleHistory(env.DB);if(!history.available||!history.lastCycle||history.lastCycle.hourKey!==new Date(now).toISOString().slice(0,13)||!['ai_unavailable','feed_unavailable','no_fresh_articles'].includes(history.lastCycle.status))return {status:'retry_not_needed'};}
+      if(retry){const history=await cycleHistory(env.DB);if(!history.available||!history.lastCycle||history.lastCycle.hourKey!==new Date(now).toISOString().slice(0,13)||!['ai_unavailable','feed_unavailable','no_fresh_articles','no_new_articles'].includes(history.lastCycle.status))return {status:'retry_not_needed'};}
       if(env.PUBLISH_ENABLED!=='true'&&env.COMMISSION_ONCE==='true')return commissionOnce(env);
       const result=await runCycle(env,{now,clock:Date.now});
       // The owner's launch request is armed, but real news remain gated on the two-model test.
