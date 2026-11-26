@@ -58,6 +58,8 @@ export function extractInlineImages(html,article){
   }
   // Modern publisher pages frequently offer AVIF plus JPEG/WebP alternatives.
   for(const [picture] of String(html).matchAll(/<picture\b[^>]*>[\s\S]*?<\/picture>/gi)){
+    if(list.length>=30)break;
+    if(/<img\b[^>]*class\s*=\s*["'][^"']*(?:avatar|advertisement|author-photo)/i.test(picture))continue;
     for(const [tag] of picture.matchAll(/<source\b[^>]*>/gi)){
       const a=attrs(tag);
       if(a.type&&!/^image\/(?:jpeg|png|webp)$/i.test(a.type))continue;
