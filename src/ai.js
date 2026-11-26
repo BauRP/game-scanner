@@ -70,12 +70,16 @@ export function verifyDraft(draft,article,editorial={}){
   const prices=new Set(money(evidence));
   for(const value of money(produced))if(!prices.has(value))throw new EditorialSkip('unsupported_price');
   const access=editorial.accessType;
+  // Remasters and remakes are distinct products; do not substitute one for the other.
+  if(/ремейк/i.test(produced)&&!/\bremake(?:s)?\b|ремейк/i.test(evidence)&&/\bremaster(?:ed|s)?\b|ремастер/i.test(evidence))throw new EditorialSkip('remake_remaster_mismatch');
+  if(/ремастер/i.test(produced)&&!/\bremaster(?:ed|s)?\b|ремастер/i.test(evidence)&&/\bremake(?:s)?\b|ремейк/i.test(evidence))throw new EditorialSkip('remake_remaster_mismatch');
   if(/(?:доступн[аоы]?|выход[аи]т|вышла|вышел|запущен[ао]?)\s+(?:в|для)\s+Казахстан[еа]/i.test(produced)&&!/(?:Kazakhstan|Казахстан)/i.test(evidence))throw new EditorialSkip('unsupported_region');
   if(['subscription','trial','addon','pre_release'].includes(access)&&/забрать навсегда|получить игру навсегда|бесплатная раздача полной игры/i.test(produced))throw new EditorialSkip('wrong_access_type');
   if(access==='pre_release'&&/игра (?:уже )?(?:вышла|состоялся релиз)|полноценный релиз состоялся/i.test(produced)&&!/\b(?:full release|out of early access|1\.0 release)\b/i.test(evidence))throw new EditorialSkip('premature_release');
+  const confirmedPercentages=new Set([...evidence.matchAll(/(\d+(?:[.,]\d+)?)\s*(?:%|percent\b|процент(?:а|ов)?(?![\p{L}]))/giu)].map(x=>x[1].replace(',','.')));
   for(const m of produced.matchAll(/(\d+(?:[.,]\d+)?)\s*(?:%|процент(?:а|ов)?(?![\p{L}]))/giu)){
     const n=m[1].replace(',','.');
-    if(![...evidence.matchAll(/(\d+(?:[.,]\d+)?)\s*(?:%|percent\b|процент(?:а|ов)?(?![\p{L}]))/giu)].some(x=>x[1].replace(',','.')===n))throw new EditorialSkip('unsupported_percentage');
+    if(!confirmedPercentages.has(n))throw new EditorialSkip('unsupported_percentage');
   }
   const fps=/(\d+(?:[.,]\d+)?)\s*(?:fps|frames per second|кадр(?:ов|а)?\s*(?:\/\s*с|в секунду))(?![\p{L}])/giu;
   const memory=/(\d+(?:[.,]\d+)?)\s*(?:gb|gigabytes?|гб|гигабайт(?:а|ов)?)(?![\p{L}])/giu;
