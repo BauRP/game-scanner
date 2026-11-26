@@ -99,7 +99,7 @@ export function isSimilarTitle(title,previous){
    if(entry.event!==event)continue;
    const b=entry.words;
    if(Math.min(a.size,b.size)/Math.max(a.size,b.size)<0.84)continue;
-   const shared=[...a].filter(x=>b.has(x)).length;
+   let shared=0;for(const x of a)if(b.has(x))shared++;
    if(shared>=4&&shared/(a.size+b.size-shared)>=0.84)return true;
  }
  return false;
