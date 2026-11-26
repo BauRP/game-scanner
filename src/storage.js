@@ -41,7 +41,7 @@ export async function reserveHour(db,now){
 }
 export function titleKey(title){
   const value=String(title||'').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
-  return value.length>=20&&value.split(' ').length>=4?value:'';
+  return value.length>=12&&value.split(' ').length>=3?value:'';
 }
 export async function recentTitleKeys(db,now){
   const result=await db.prepare("SELECT title FROM posts WHERE created_at >= ? AND status IN ('sent','processing','failed') ORDER BY created_at DESC LIMIT 180").bind(new Date(now-72*3600000).toISOString()).all();
