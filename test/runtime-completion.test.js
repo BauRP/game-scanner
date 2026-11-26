@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {titleKey,isSimilarTitle,prepareTitleIndex} from '../src/storage.js';
-import {composePost} from '../src/telegram.js';
+import {composePost,sendCoverPhoto} from '../src/telegram.js';
 import {SOURCES} from '../src/sources.js';
 import {photoCandidates} from '../src/photo-selection.js';
 const source=SOURCES.find(s=>s.name==='Gematsu')||SOURCES[0];
