@@ -35,7 +35,8 @@ export async function telegramCall(token,method,data,fetchFn=fetch){
 export async function sendCoverPhoto(caption,env,fetchFn=fetch){
   const data=new FormData();
   data.append('chat_id',env.TELEGRAM_CHAT_ID);
-  data.append('caption',caption);\n  data.append('parse_mode','HTML');
+  data.append('caption',caption);
+  data.append('parse_mode','HTML');
   data.append('photo',new Blob([coverPngBytes()],{type:'image/png'}),'game-scanner.png');
   const r=await callApi(env.TELEGRAM_BOT_TOKEN,'sendPhoto',{body:data},fetchFn);
   return r.message_id;
@@ -45,7 +46,8 @@ export async function sendPublisherPhoto(draft,article,image,env,fetchFn=fetch){
   if(!image?.bytes?.length||!['image/png','image/jpeg','image/webp'].includes(image.mime))throw new Error('Validated original image required');
   const data=new FormData();
   data.append('chat_id',env.TELEGRAM_CHAT_ID);
-  data.append('caption',composePost(draft,article));\n  data.append('parse_mode','HTML');
+  data.append('caption',composePost(draft,article));
+  data.append('parse_mode','HTML');
   data.append('photo',new Blob([image.bytes],{type:image.mime}),image.mime==='image/png'?'news.png':image.mime==='image/webp'?'news.webp':'news.jpg');
   const sent=await callApi(env.TELEGRAM_BOT_TOKEN,'sendPhoto',{body:data},fetchFn);
   return sent.message_id;
