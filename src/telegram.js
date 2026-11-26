@@ -12,7 +12,7 @@ export function composePost(draft,article){
   try{url=new URL(article?.url);}catch{throw new Error('Telegram caption lacks verifiable source');}
   if(!headline||!body||!publisher||url.protocol!=='https:'||url.username||url.password||url.port||!publisher.hosts.includes(url.hostname))throw new Error('Telegram caption lacks verifiable source');
   if(/https?:\/\/|www\.|(?:^|\s)источник\s*:/i.test(headline+' '+body))throw new Error('Unexpected public source footer');
-  return '🎮 '+headline+'\n\n'+body;
+  return '🎮 <b>'+htmlEscape(headline)+'</b>\n\n'+htmlEscape(body)+'\n\n🔗 Источник: <a href="'+htmlEscape(url.href)+'">'+htmlEscape(publisher.name)+'</a>';
 }
 export class TelegramApiError extends Error{
   constructor(method,status,description){
