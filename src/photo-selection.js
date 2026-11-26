@@ -26,7 +26,8 @@ export async function* photoCandidates(articles,{fetchFn=fetch,findImage=findArt
    if(lookups++>=maxLookups)break;
    if(await wasAttempted(article.url))continue;
    if(!useImages){yield {article,editorial,image:null};continue;}
-   if(probes++>=maxStories||requests>=maxRequests)break;
+   if(probes>=maxStories||requests>=maxRequests)break;
+   probes++;
    let limited=false,image=null;
    const probeFetch=(...args)=>{if(requests>=maxRequests)limited=true;return boundedFetch(...args);};
    try{image=await findImage(article,probeFetch);}catch{/* An unavailable image is not a failed publication. */}
