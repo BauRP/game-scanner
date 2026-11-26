@@ -2,10 +2,11 @@ import {requireRussianDraft} from './translator.js';
 import {findArticleImage} from './images.js';
 import {coverPngBytes} from './cover.js';
 import {sourceByName} from './sources.js';
+const htmlEscape=value=>String(value).replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));
 export function composePost(draft,article){
   const headline=String(draft.headline||'').replace(/[\r\n]/g,' ').trim().slice(0,85);
   const body=String(draft.body||'').replace(/[\r\n]/g,' ').trim().slice(0,420);
-  // Keep the original URL internally; the reader sees only headline and editorial text.
+  // Always expose the verified original publisher and article as a clickable attribution.
   const publisher=sourceByName(article?.source);
   let url;
   try{url=new URL(article?.url);}catch{throw new Error('Telegram caption lacks verifiable source');}
@@ -34,7 +35,7 @@ export async function telegramCall(token,method,data,fetchFn=fetch){
 export async function sendCoverPhoto(caption,env,fetchFn=fetch){
   const data=new FormData();
   data.append('chat_id',env.TELEGRAM_CHAT_ID);
-  data.append('caption',caption);
+  data.append('caption',caption);\n  data.append('parse_mode','HTML');
   data.append('photo',new Blob([coverPngBytes()],{type:'image/png'}),'game-scanner.png');
   const r=await callApi(env.TELEGRAM_BOT_TOKEN,'sendPhoto',{body:data},fetchFn);
   return r.message_id;
@@ -44,7 +45,7 @@ export async function sendPublisherPhoto(draft,article,image,env,fetchFn=fetch){
   if(!image?.bytes?.length||!['image/png','image/jpeg','image/webp'].includes(image.mime))throw new Error('Validated original image required');
   const data=new FormData();
   data.append('chat_id',env.TELEGRAM_CHAT_ID);
-  data.append('caption',composePost(draft,article));
+  data.append('caption',composePost(draft,article));\n  data.append('parse_mode','HTML');
   data.append('photo',new Blob([image.bytes],{type:image.mime}),image.mime==='image/png'?'news.png':image.mime==='image/webp'?'news.webp':'news.jpg');
   const sent=await callApi(env.TELEGRAM_BOT_TOKEN,'sendPhoto',{body:data},fetchFn);
   return sent.message_id;
