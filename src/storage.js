@@ -79,7 +79,7 @@ export async function releaseHour(db,now){
  await db.prepare("DELETE FROM publication_hours WHERE hour_key=?").bind(hourKey(now)).run();
 }
 const EVENT_WORDS=/\b(?:cancel(?:led|ed|s)?|delay(?:ed|s)?|postpon(?:ed|es)|den(?:ied|ies)|refut(?:ed|es)|debunk(?:ed|s)?|refund(?:ed|s)?|shutdown|closed|reopen(?:ed|s)?|restor(?:ed|es))\b/g;
-const eventKey=s=>[...new Set(s.match(EVENT_WORDS)||[])].sort().join(',');
+const eventKey=s=>[...new Set(s.match(EVENT_WORDS)||[])].sort().join(',')+(/\b(?:not|no longer|never|won t|will not|isn t|doesn t)\b/.test(s)?':negative':'');
 const STOP=new Set(['the','and','for','with','from','this','that','its','new','game','games','on','in','of','to','a','an','is','at','by']);
 export function prepareTitleIndex(previous){
  const words=x=>new Set(x.split(' ').filter(w=>w.length>2&&!STOP.has(w)));
@@ -94,9 +94,9 @@ export function isSimilarTitle(title,previous){
  const a=words(key);if(a.size<4)return false;
  const numbers=x=>(x.match(/\d+(?:[.,]\d+)?/g)||[]).join(',');
  const index=previous instanceof Map?previous:prepareTitleIndex(previous);
- const num=numbers(key);
+ const num=numbers(key),event=eventKey(key);
  for(const entry of index.get(num)||[]){
-   if(entry.event!==eventKey(key))continue;
+   if(entry.event!==event)continue;
    const b=entry.words;
    if(Math.min(a.size,b.size)/Math.max(a.size,b.size)<0.84)continue;
    const shared=[...a].filter(x=>b.has(x)).length;
