@@ -45,15 +45,12 @@ export async function runCycle(env,deps={}){
   const {articles,errors=[],feedStats=[]}=news;
   const checks=[],quality=await readQuality(env.DB);
   let draftsTried=0,rejected=0;
-  const checkedArticles=new Set();
-  try{
+    try{
   for await(const selection of photoCandidates(articles.filter(a=>!previousTitles.has(titleKey(a.title))&&!isSimilarTitle(a.title,titleIndex)),{fetchFn:editorialFetch,findImage:deps.findArticleImage,wasAttempted:url=>alreadyAttempted(env.DB,url),useImages:env.USE_SOURCE_IMAGES==='true',quality,checks,recentCategories:recent})){
     const {article:item,editorial}=selection;
     if(draftsTried>=2)break;
     // Never start delivery in a different hour from the reservation.
     if((!deps.now||deps.clock)&&Math.floor(clock()/3600000)!==Math.floor(now/3600000))return {status:'hour_expired',day};
-    if(checkedArticles.has(item.url))continue;
-    checkedArticles.add(item.url);
     if(!await claim(env.DB,item,day,now))continue;
     draftsTried++;
     let draft;
@@ -85,7 +82,7 @@ export async function runCycle(env,deps={}){
       // Never auto retry ambiguous Telegram delivery, which can cause duplicates.
       await markFailed(env.DB,item.url);
       console.error('Posting failed:',String(e?.message||e).slice(0,140));
-      return {status:'post_failed',day};
+      return {status:'post_failed',externalRequests,day};
     }
   }
   if(errors.length)console.warn('Feeds unavailable:',errors.join(' | '));
