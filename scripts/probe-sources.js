@@ -1,5 +1,5 @@
 import {FEEDS} from '../src/sources.js';
-import {parseFeed,isFeedXml} from '../src/news.js';
+import {parseFeed,isFeedXml,fetchNews} from '../src/news.js';
 import {findArticleImage} from '../src/images.js';
 
 async function probe(feed){
@@ -16,6 +16,8 @@ async function probe(feed){
  }catch(e){return {source:feed.name,url:feed.url,error:String(e?.message||e).slice(0,120)};}
 }
 for(let i=0;i<FEEDS.length;i+=4)for(const result of await Promise.all(FEEDS.slice(i,i+4).map(probe)))console.log('FEED_PROBE '+JSON.stringify(result));
+const runtime=await fetchNews(fetch,Date.now(),72);
+console.log('RUNTIME_FEEDS '+JSON.stringify(runtime.feedStats));
 for(const path of ['/health','/commissioning-status','/source-quality','/publication-status','/ai-usage']){
  try{
  const r=await fetch('https://game-scanner.bikobaur.workers.dev'+path,{signal:AbortSignal.timeout(10000)});
