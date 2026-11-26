@@ -12,6 +12,9 @@ test('title keys preserve decimal hardware and patch version numbers',()=>{
 });
 test('every Telegram post shows a verified clickable publisher and original article link',()=>{
  const draft={headline:'Новый игровой трейлер',body:'Разработчики показали свежие кадры игрового процесса.'};
- assert.equal(composePost(draft,item),'🎮 Новый игровой трейлер\n\nРазработчики показали свежие кадры игрового процесса.');
+ const caption=composePost({...draft,headline:'Новый трейлер <PS5> & детали'}, {...item,url:item.url+'?story=1&ref=feed'});
+ assert.match(caption,/🔗 Источник: <a href="https:\/\/www\.gematsu\.com\/story\?story=1&amp;ref=feed">Gematsu<\/a>/);
+ assert.match(caption,/<b>Новый трейлер &lt;PS5&gt; &amp; детали<\/b>/);
  assert.throws(()=>composePost({...draft,body:draft.body+' Источник: https://example.com'},item),/Unexpected public source footer/);
+ assert.throws(()=>composePost(draft,{...item,url:'https://example.com/fake'}),/verifiable source/);
 });
