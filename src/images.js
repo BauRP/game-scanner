@@ -187,6 +187,8 @@ async function download(url,article,fetchFn,deadline){
     if(!hit)return null;
     const type=hit.res.headers.get('content-type')||'';
     if(type&&!/^(?:image\/|application\/octet-stream)/i.test(type)){await hit.res.body?.cancel().catch(()=>{});return null;}
+    // An explicitly unsupported encoding need not consume the download budget.
+    if(/^image\/(?:avif|svg\+xml|gif)(?:;|$)/i.test(type)){await hit.res.body?.cancel().catch(()=>{});return null;}
     const bytes=await readLimited(hit.res,MAX_IMAGE);
     const mime=fileType(bytes);return mime?{url:hit.url,bytes,mime}:null;
   }catch{return null;}

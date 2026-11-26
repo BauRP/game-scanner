@@ -6,9 +6,12 @@ export async function readQuality(db){
 }
 export function combineQuality(previous={},feeds=[],checks=[]){
  const result={...previous};
- for(const {source,ok,articles,withImage} of feeds){
+ for(const {source,ok,articles,withImage,reason} of feeds){
    const v=result[source]={...(result[source]||{})};
    v.lastFeedOk=Boolean(ok);v.lastFeedCheckAt=new Date().toISOString();
+   v.consecutiveFailures=ok?0:(v.consecutiveFailures||0)+1;
+   // Expose safe failure categories, never raw URLs or network exception contents.
+   v.lastFeedError=ok?null:/^HTTP_\d{3}$|^(?:redirect_loop|feed_redirect_unavailable|invalid_feed_root|incomplete_feed_prefix)$/.test(reason||'')?reason:'network_or_parse_error';
    v.feedChecks=(v.feedChecks||0)+1;v.feedOk=(v.feedOk||0)+Number(ok);
    v.articles=(v.articles||0)+(Number.isFinite(articles)?articles:0);v.withImage=(v.withImage||0)+(Number.isFinite(withImage)?withImage:0);
  }

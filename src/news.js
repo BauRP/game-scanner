@@ -94,6 +94,11 @@ export function rankNews(items,qualityBonus=()=>0,quality={}) {
   };
   return items.map(a=>({a,score:score(a)})).sort((a,b)=>b.score-a.score).map(x=>x.a);
 }
+// Validate the feed root, not arbitrary HTML fragments embedded in RSS descriptions.
+export function isFeedXml(xml){
+  const head=String(xml).replace(/^\uFEFF/,'').replace(/^\s*(?:(?:<\?[\s\S]*?\?>|<!--[\s\S]*?-->)\s*)*/,'');
+  return /^<(?:rss|feed|rdf:RDF)(?:\s|>)/i.test(head);
+}
 export async function fetchNews(fetchFn=fetch,now=Date.now(),maxAgeHours=72) {
   const results=[];
   let redirects=0;
@@ -103,28 +108,38 @@ export async function fetchNews(fetchFn=fetch,now=Date.now(),maxAgeHours=72) {
       headers:{'Accept':'application/rss+xml, application/atom+xml, application/xml, text/xml','User-Agent':'GameScannerNewsBot/1.0'},
       signal:AbortSignal.timeout(9000)
     };
-    let res=await fetchFn(url,options);
-    if([301,302,303,307,308].includes(res.status)){
+    const hosts=[...source.hosts,new URL(source.url).hostname];
+    const visited=new Set();
+    let res;
+    for(let hop=0;hop<=2;hop++){
+      if(visited.has(url))throw Error('redirect_loop');
+      visited.add(url);
+      res=await fetchFn(url,options);
+      if(![301,302,303,307,308].includes(res.status))break;
       const loc=res.headers.get('location');await res.body?.cancel().catch(()=>{});
-      const next=loc?normalizedUrl(new URL(loc,url).href,[...source.hosts,new URL(source.url).hostname]):'';
-      if(!next||redirects>=6)throw Error('feed redirect unavailable');
-      redirects++;res=await fetchFn(next,options);
+      const next=loc?normalizedUrl(new URL(loc,url).href,hosts):'';
+      if(!next||redirects>=6||hop===2)throw Error('feed_redirect_unavailable');
+      redirects++;url=next;
     }
-    if(!res.ok){await res.body?.cancel().catch(()=>{});throw new Error(source.name+' HTTP '+res.status);}
-    const len=Number(res.headers.get('content-length')||0);
-    if(len>MAX_FEED_BYTES){await res.body?.cancel().catch(()=>{});throw new Error(source.name+' feed too large');}
+    if(!res.ok){await res.body?.cancel().catch(()=>{});throw Error('HTTP_'+res.status);}
+    // Large feeds can contain usable complete items within the bounded prefix.
+    // Never download the full oversized response, even if Content-Length is absent.
     const xml=await articleHtml(res,MAX_FEED_BYTES);
-    if(!/<(?:rss|feed|rdf:RDF)\b/i.test(xml)||/<html\b/i.test(xml.slice(0,1000)))throw Error('invalid RSS or Atom response');
+    if(!isFeedXml(xml))throw Error('invalid_feed_root');
+    const complete=/<\/(?:rss|feed|rdf:RDF)\s*>/i.test(xml);
+    if(!complete&&!/<\/(?:item|entry)\s*>/i.test(xml))throw Error('incomplete_feed_prefix');
     return parseFeed(xml,source,now,maxAgeHours);
   })));
-  const items=[],errors=[];
+  const items=[],errors=[],feedStats=[];
   for(let i=0;i<results.length;i++){
-    if(results[i].status==='fulfilled')items.push(...results[i].value);
-    else errors.push(FEEDS[i].name+': '+String(results[i].reason?.message||'unavailable').slice(0,120));
+    const r=results[i],f=FEEDS[i],ok=r.status==='fulfilled';
+    const reason=ok?null:String(r.reason?.message||'unavailable').slice(0,120);
+    if(ok)items.push(...r.value);else errors.push(f.name+': '+reason);
+    feedStats.push({source:f.name,ok,articles:ok?r.value.length:0,withImage:ok?r.value.filter(a=>a.imageCandidates.length).length:0,...(!ok?{reason}:{})});
   }
   const unique=new Map();
   for(const item of items){const old=unique.get(item.url);if(!old||item.publishedAt>old.publishedAt||(item.publishedAt===old.publishedAt&&item.imageCandidates.length>old.imageCandidates.length))unique.set(item.url,item);}
-  return {articles:rankNews([...unique.values()]),errors,feedStats:FEEDS.map((f,i)=>({source:f.name,ok:results[i].status==='fulfilled',articles:results[i].value?.length||0,withImage:results[i].value?.filter(a=>a.imageCandidates.length).length||0}))};
+  return {articles:rankNews([...unique.values()]),errors,feedStats};
 }
 
 export function needsGameContext(article,editorial={}){
