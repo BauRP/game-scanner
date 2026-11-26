@@ -65,6 +65,7 @@ export async function runCycle(env,deps={}){
       if(e instanceof EditorialSkip){
         await markFailed(env.DB,item.url);
         rejected++;
+        if(draftsTried>=2)break;
         continue;
       }
       // AI failure happened BEFORE any Telegram request. Safe to release the claim.
@@ -72,7 +73,7 @@ export async function runCycle(env,deps={}){
       console.error('AI unavailable; nothing was published:',String(e?.message||e).slice(0,140));
       const quota=e?.diagnostics?.some(x=>x.reason==='daily_quota');
       if(!quota)await releaseHour(env.DB,now);
-      return {status:quota?'daily_ai_quota':'ai_unavailable',day};
+      return {status:quota?'daily_ai_quota':'ai_unavailable',externalRequests,day};
     }
     if((!deps.now||deps.clock)&&Math.floor(clock()/3600000)!==Math.floor(now/3600000)){await releaseClaim(env.DB,item.url);return {status:'hour_expired',day};}
     try{
@@ -89,8 +90,8 @@ export async function runCycle(env,deps={}){
   }
   if(errors.length)console.warn('Feeds unavailable:',errors.join(' | '));
   // No Telegram call was made. Partial feed failure can justify a bounded second attempt.
-  if(errors.length){await releaseHour(env.DB,now);return {status:'feed_unavailable',failedFeeds:errors.length,rejected,day};}
-  return {status:rejected?'editorial_rejected':articles.length?'no_new_articles':'no_fresh_articles',failedFeeds:0,rejected,day};
+  if(errors.length){await releaseHour(env.DB,now);return {status:'feed_unavailable',failedFeeds:errors.length,rejected,externalRequests,day};}
+  return {status:rejected?'editorial_rejected':articles.length?'no_new_articles':'no_fresh_articles',failedFeeds:0,rejected,externalRequests,day};
   }finally{await saveQuality(env.DB,feedStats,checks);}
 }
 
