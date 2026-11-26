@@ -25,6 +25,10 @@ export async function runCycle(env,deps={}){
     if(!commissioned(result))return {status:'commissioning_required'};
   }
   const now=deps.now??Date.now();
+  // Explicit per-cycle network budget; keep room for Telegram and database work.
+  const network=deps.fetchFn||fetch;
+  let externalRequests=0;
+  const editorialFetch=(...args)=>{if(externalRequests>=38)throw Error('Editorial network budget reached');externalRequests++;return network(...args);};
   const clock=deps.clock||Date.now;
   const day=dayKey(now,0); // Cloudflare free allocation resets at 00:00 UTC (05:00 Kazakhstan).
   const max=intVal(env.MAX_POSTS_PER_DAY,24,1,24);
@@ -37,13 +41,13 @@ export async function runCycle(env,deps={}){
   const titleIndex=prepareTitleIndex(previousTitles);
   const recent=await recentCategories(env.DB,now);
   let news;
-  try{news=await (deps.fetchNews||fetchNews)(deps.fetchFn||fetch,now,intVal(env.MAX_ARTICLE_AGE_HOURS,72,1,168));}catch{await releaseHour(env.DB,now);return {status:'feed_unavailable',day};}
+  try{news=await (deps.fetchNews||fetchNews)(editorialFetch,now,intVal(env.MAX_ARTICLE_AGE_HOURS,72,1,168));}catch{await releaseHour(env.DB,now);return {status:'feed_unavailable',day};}
   const {articles,errors=[],feedStats=[]}=news;
   const checks=[],quality=await readQuality(env.DB);
   let draftsTried=0,rejected=0;
   const checkedArticles=new Set();
   try{
-  for await(const selection of photoCandidates(articles.filter(a=>!previousTitles.has(titleKey(a.title))&&!isSimilarTitle(a.title,titleIndex)),{fetchFn:deps.fetchFn||fetch,findImage:deps.findArticleImage,wasAttempted:url=>alreadyAttempted(env.DB,url),useImages:env.USE_SOURCE_IMAGES==='true',quality,checks,recentCategories:recent})){
+  for await(const selection of photoCandidates(articles.filter(a=>!previousTitles.has(titleKey(a.title))&&!isSimilarTitle(a.title,titleIndex)),{fetchFn:editorialFetch,findImage:deps.findArticleImage,wasAttempted:url=>alreadyAttempted(env.DB,url),useImages:env.USE_SOURCE_IMAGES==='true',quality,checks,recentCategories:recent})){
     const {article:item,editorial}=selection;
     if(draftsTried>=2)break;
     // Never start delivery in a different hour from the reservation.
@@ -54,13 +58,14 @@ export async function runCycle(env,deps={}){
     draftsTried++;
     let draft;
     try{
-      draft=await (deps.writePost||writePost)(item,env,deps.fetchFn||fetch,editorial);
+      draft=await (deps.writePost||writePost)(item,env,editorialFetch,editorial);
       const problem=russianDraftProblem(draft);
       if(problem)throw new EditorialSkip(problem);
     }catch(e){
       if(e instanceof EditorialSkip){
         await markFailed(env.DB,item.url);
         rejected++;
+        if(draftsTried>=2)break;
         continue;
       }
       // AI failure happened BEFORE any Telegram request. Safe to release the claim.
@@ -68,14 +73,14 @@ export async function runCycle(env,deps={}){
       console.error('AI unavailable; nothing was published:',String(e?.message||e).slice(0,140));
       const quota=e?.diagnostics?.some(x=>x.reason==='daily_quota');
       if(!quota)await releaseHour(env.DB,now);
-      return {status:quota?'daily_ai_quota':'ai_unavailable',day};
+      return {status:quota?'daily_ai_quota':'ai_unavailable',externalRequests,day};
     }
     if((!deps.now||deps.clock)&&Math.floor(clock()/3600000)!==Math.floor(now/3600000)){await releaseClaim(env.DB,item.url);return {status:'hour_expired',day};}
     try{
       const messageId=await (deps.publishPost||publishPost)(draft,item,env,deps.fetchFn||fetch,selection);
       if(!Number.isInteger(messageId)||messageId<=0)throw Error('Missing Telegram message ID');
       await markSent(env.DB,item.url,messageId);
-      return {status:'sent',source:item.source,engine:draft.engine,category:editorial.category,imageMode:selection.check?.accepted===true?'publisher':'game-scanner-cover',messageId,day};
+      return {status:'sent',source:item.source,engine:draft.engine,category:editorial.category,imageMode:selection.check?.accepted===true?'publisher':'game-scanner-cover',messageId,externalRequests,day};
     }catch(e){
       // Never auto retry ambiguous Telegram delivery, which can cause duplicates.
       await markFailed(env.DB,item.url);
@@ -85,8 +90,8 @@ export async function runCycle(env,deps={}){
   }
   if(errors.length)console.warn('Feeds unavailable:',errors.join(' | '));
   // No Telegram call was made. Partial feed failure can justify a bounded second attempt.
-  if(errors.length){await releaseHour(env.DB,now);return {status:'feed_unavailable',failedFeeds:errors.length,rejected,day};}
-  return {status:rejected?'editorial_rejected':articles.length?'no_new_articles':'no_fresh_articles',failedFeeds:0,rejected,day};
+  if(errors.length){await releaseHour(env.DB,now);return {status:'feed_unavailable',failedFeeds:errors.length,rejected,externalRequests,day};}
+  return {status:rejected?'editorial_rejected':articles.length?'no_new_articles':'no_fresh_articles',failedFeeds:0,rejected,externalRequests,day};
   }finally{await saveQuality(env.DB,feedStats,checks);}
 }
 
@@ -209,7 +214,7 @@ export default {
       const ready=requested&&Boolean(env.DB&&env.AI&&env.TELEGRAM_BOT_TOKEN&&env.TELEGRAM_CHAT_ID)&&(env.COMMISSION_ONCE!=='true'||commissioned(state));
       return Response.json({ok:true,service:'game-scanner',publishing:requested,readyToPublish:ready,commissioningState:state.status,history,
         telegramConfigured:Boolean(env.TELEGRAM_BOT_TOKEN&&env.TELEGRAM_CHAT_ID),storageConfigured:Boolean(env.DB),
-        testStatus,commissioning:env.COMMISSION_ONCE==='true',imagePipelineVersion:'original-photo-v2',aiDiagnosticsVersion:2,primaryModel:env.AI_MODEL||'@cf/openai/gpt-oss-20b',backupModel:env.AI_BACKUP_MODEL||'@cf/google/gemma-4-26b-a4b-it',sourceImages:env.USE_SOURCE_IMAGES==='true',sourceExpansionVersion:2,translationPolicy:'russian-required-v1',captionPolicy:'headline-body-v1',publicationIntervalMinutes:60,maxPostsPerDay:intVal(env.MAX_POSTS_PER_DAY,24,1,24),quotaResetUtc:'00:00'},{headers:{'Cache-Control':'no-store'}});
+        testStatus,commissioning:env.COMMISSION_ONCE==='true',imagePipelineVersion:'original-photo-v3',aiDiagnosticsVersion:2,primaryModel:env.AI_MODEL||'@cf/openai/gpt-oss-20b',backupModel:env.AI_BACKUP_MODEL||'@cf/google/gemma-4-26b-a4b-it',sourceImages:env.USE_SOURCE_IMAGES==='true',sourceExpansionVersion:2,translationPolicy:'russian-required-v1',captionPolicy:'headline-body-v1',publicationIntervalMinutes:60,maxPostsPerDay:intVal(env.MAX_POSTS_PER_DAY,24,1,24),quotaResetUtc:'00:00'},{headers:{'Cache-Control':'no-store'}});
     }
     if(request.method==='POST'&&url.pathname==='/run'){
       if(!env.ADMIN_KEY||request.headers.get('Authorization')!=='Bearer '+env.ADMIN_KEY)return new Response('Unauthorized',{status:401});

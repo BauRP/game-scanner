@@ -38,14 +38,15 @@ export function assessArticle(article){
   const trial=has(combined,/\b(free demo|demo available|free trial|free weekend|weekend trial|play for free (?:this|until)|open beta|closed beta|playtest)\b/i);
   const keep=has(combined,/\b(free to keep|keep forever|claim for free|100% off)\b/i);
   const rumor=has(title,RUMOR)||has(body,/\b(?:reportedly|allegedly|unconfirmed|according to (?:a |an )?(?:leak|insider)|rumou?r suggests)\b/i);
-  const subscription=has(combined,/\b(game pass|playstation plus|ps plus|ea play|ubisoft\+|subscription|prime gaming)\b/i);
+  const subscription=has(combined,/\b(game pass|playstation plus|ps plus|ea play|subscription|prime gaming)\b|\bubisoft\+/i);
   const expansion=has(title,/\b(dlc|expansion|add-on|downloadable content|skin pack)\b/i);
   const earlyAccess=has(title,/\b(early access|pre[- ]?order|delayed|postponed|release date)\b/i);
+  const exitsEarlyAccess=has(title,/\b(?:leaves|exits|out of|ends|graduat(?:es|ed|ing) from) early access\b/i);
   const expired=has(combined,/\b(giveaway (?:has )?ended|offer (?:has )?expired|no longer free|deal (?:has )?ended)\b/i);
   if(expired&&has(combined,GIVEAWAY))return {eligible:false,reason:'expired_giveaway'};
-  if(subscription&&has(combined,GIVEAWAY)&&!keep&&!freeLaunch)return {eligible:true,category:CATEGORIES[rumor?14:1],rumor,accessType:'subscription'};
+  if(subscription&&has(combined,GIVEAWAY)&&!freeLaunch&&(!keep||has(combined,/\b(?:subscription required|active subscription|requires (?:an? )?(?:active )?subscription)\b/i)))return {eligible:true,category:CATEGORIES[rumor?14:1],rumor,accessType:'subscription'};
   if(expansion&&has(combined,GIVEAWAY)&&!freeLaunch)return {eligible:true,category:CATEGORIES[rumor?14:4],rumor,accessType:'addon'};
-  if(earlyAccess&&!trial&&!keep&&!has(title,/\b(?:leaves|exits|out of|ends) early access\b/i))return {eligible:true,category:CATEGORIES[rumor?14:2],rumor,accessType:'pre_release'};
+  if(earlyAccess&&!trial&&!keep&&!exitsEarlyAccess)return {eligible:true,category:CATEGORIES[rumor?14:2],rumor,accessType:'pre_release'};
   // Time-limited access is not ownership, even when a headline says "free game".
   if(trial&&!keep)return {eligible:true,category:CATEGORIES[rumor?14:12],rumor,accessType:'trial'};
   if(has(combined,GIVEAWAY)&&!freeLaunch){
@@ -53,6 +54,7 @@ export function assessArticle(article){
     if(!has(combined,QUALITY_SIGNAL))return {eligible:false,category:CATEGORIES[0],reason:'giveaway_quality_not_verified'};
     return {eligible:true,category:CATEGORIES[rumor?14:0],rumor,accessType:'giveaway'};
   }
+  if(exitsEarlyAccess)return {eligible:true,category:CATEGORIES[rumor?14:2],rumor,accessType:'full_release'};
   let c=freeLaunch?2:1;
   if(has(combined,/\b(ceo|chief executive|resign(?:ed|ation)?|fired|rehir(?:ed|ing)|reinstat(?:ed|ement)|layoffs?|laying off|studio closure|studio shuts|acquisition|acquired|merger|executive|board of directors)\b/i))c=15;
   else if(has(combined,/\b(major outage|servers? down|security breach|critical bug|gamebreaking|shutdown|delisted|vulnerability)\b/i))c=13;

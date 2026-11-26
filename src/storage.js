@@ -48,33 +48,44 @@ export async function recentTitleKeys(db,now){
   return new Set((result.results||[]).map(r=>titleKey(r.title)).filter(Boolean));
 }
 
+const CREATE_HISTORY="CREATE TABLE IF NOT EXISTS cycle_history (hour_key TEXT PRIMARY KEY, recorded_at TEXT NOT NULL, result_json TEXT NOT NULL)";
 export async function recordCycle(db,now,result){
  if(!db)return;
  try{
- await db.prepare("CREATE TABLE IF NOT EXISTS cycle_history (hour_key TEXT PRIMARY KEY, recorded_at TEXT NOT NULL, result_json TEXT NOT NULL)").run();
- const data={status:String(result.status||'unknown'),...(result.source?{source:result.source}:{}),...(result.category?{category:result.category}:{}),...(result.imageMode?{imageMode:result.imageMode}:{}),...(result.engine?{engine:result.engine}:{}),...(Number.isInteger(result.messageId)?{messageId:result.messageId}:{}),...(Number.isInteger(result.failedFeeds)?{failedFeeds:result.failedFeeds}:{}),...(Number.isInteger(result.rejected)?{rejected:result.rejected}:{})};
+ await db.prepare(CREATE_HISTORY).run();
+ const data={status:String(result.status||'unknown'),...(result.source?{source:result.source}:{}),...(result.category?{category:result.category}:{}),...(result.imageMode?{imageMode:result.imageMode}:{}),...(result.engine?{engine:result.engine}:{}),...(Number.isInteger(result.messageId)?{messageId:result.messageId}:{}),...(Number.isInteger(result.failedFeeds)?{failedFeeds:result.failedFeeds}:{}),...(Number.isInteger(result.rejected)?{rejected:result.rejected}:{}),...(Number.isInteger(result.externalRequests)?{externalRequests:result.externalRequests}:{})};
  await db.prepare("INSERT INTO cycle_history(hour_key,recorded_at,result_json) VALUES (?,?,?) ON CONFLICT(hour_key) DO UPDATE SET recorded_at=excluded.recorded_at,result_json=excluded.result_json WHERE json_extract(cycle_history.result_json,'$.status')!='sent' AND json_extract(excluded.result_json,'$.status')!='hour_already_reserved'").bind(hourKey(now),new Date().toISOString(),JSON.stringify(data)).run();
  }catch{console.warn('Cycle history unavailable');}
 }
 export async function cycleHistory(db){
  if(!db)return {available:false};
+ let lastCycle=null,lastPublication=null,historyAvailable=false,publicationAvailable=false;
  try{
+ await db.prepare(CREATE_HISTORY).run();
  const row=await db.prepare("SELECT hour_key,recorded_at,result_json FROM cycle_history ORDER BY hour_key DESC LIMIT 1").first();
+ lastCycle=row?{hourKey:row.hour_key,recordedAt:row.recorded_at,...JSON.parse(row.result_json)}:null;
+ historyAvailable=true;
+ }catch{console.warn('Cycle history read unavailable');}
+ try{
  const sent=await db.prepare("SELECT created_at,telegram_message_id FROM posts WHERE status='sent' ORDER BY created_at DESC LIMIT 1").first();
- return {available:true,lastCycle:row?{hourKey:row.hour_key,recordedAt:row.recorded_at,...JSON.parse(row.result_json)}:null,lastPublication:sent?{createdAt:sent.created_at,messageId:sent.telegram_message_id}:null};
- }catch{return {available:false};}
+ lastPublication=sent?{createdAt:sent.created_at,messageId:sent.telegram_message_id}:null;
+ publicationAvailable=true;
+ }catch{console.warn('Publication history read unavailable');}
+ return {available:historyAvailable,publicationAvailable,lastCycle,lastPublication};
 }
 
 export async function releaseHour(db,now){
  // Only called on an explicit pre-Telegram failure. Never release an ambiguous delivery.
  await db.prepare("DELETE FROM publication_hours WHERE hour_key=?").bind(hourKey(now)).run();
 }
+const EVENT_WORDS=/\b(?:cancel(?:led|ed|s)?|delay(?:ed|s)?|postpon(?:ed|es)|den(?:ied|ies)|refut(?:ed|es)|debunk(?:ed|s)?|refund(?:ed|s)?|shutdown|closed|reopen(?:ed|s)?|restor(?:ed|es))\b/g;
+const eventKey=s=>[...new Set(s.match(EVENT_WORDS)||[])].sort().join(',')+(/\b(?:not|no longer|never|won t|will not|isn t|doesn t)\b/.test(s)?':negative':'');
 const STOP=new Set(['the','and','for','with','from','this','that','its','new','game','games','on','in','of','to','a','an','is','at','by']);
 export function prepareTitleIndex(previous){
  const words=x=>new Set(x.split(' ').filter(w=>w.length>2&&!STOP.has(w)));
  const numbers=x=>(x.match(/\d+(?:[.,]\d+)?/g)||[]).join(',');
  const index=new Map();
- for(const key of previous){const w=words(key);if(w.size<4)continue;const n=numbers(key);if(!index.has(n))index.set(n,[]);index.get(n).push(w);}
+ for(const key of previous){const w=words(key);if(w.size<4)continue;const n=numbers(key);if(!index.has(n))index.set(n,[]);index.get(n).push({words:w,event:eventKey(key)});}
  return index;
 }
 export function isSimilarTitle(title,previous){
@@ -83,8 +94,10 @@ export function isSimilarTitle(title,previous){
  const a=words(key);if(a.size<4)return false;
  const numbers=x=>(x.match(/\d+(?:[.,]\d+)?/g)||[]).join(',');
  const index=previous instanceof Map?previous:prepareTitleIndex(previous);
- const num=numbers(key);
- for(const b of index.get(num)||[]){
+ const num=numbers(key),event=eventKey(key);
+ for(const entry of index.get(num)||[]){
+   if(entry.event!==event)continue;
+   const b=entry.words;
    if(Math.min(a.size,b.size)/Math.max(a.size,b.size)<0.84)continue;
    const shared=[...a].filter(x=>b.has(x)).length;
    if(shared>=4&&shared/(a.size+b.size-shared)>=0.84)return true;

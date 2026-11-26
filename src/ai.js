@@ -70,12 +70,17 @@ export function verifyDraft(draft,article,editorial={}){
   const prices=new Set(money(evidence));
   for(const value of money(produced))if(!prices.has(value))throw new EditorialSkip('unsupported_price');
   const access=editorial.accessType;
+  if(/(?:доступн[аоы]?|выход[аи]т|вышла|вышел|запущен[ао]?)\s+(?:в|для)\s+Казахстан[еа]/i.test(produced)&&!/(?:Kazakhstan|Казахстан)/i.test(evidence))throw new EditorialSkip('unsupported_region');
   if(['subscription','trial','addon','pre_release'].includes(access)&&/забрать навсегда|получить игру навсегда|бесплатная раздача полной игры/i.test(produced))throw new EditorialSkip('wrong_access_type');
   if(access==='pre_release'&&/игра (?:уже )?(?:вышла|состоялся релиз)|полноценный релиз состоялся/i.test(produced)&&!/\b(?:full release|out of early access|1\.0 release)\b/i.test(evidence))throw new EditorialSkip('premature_release');
   for(const m of produced.matchAll(/(\d+(?:[.,]\d+)?)\s*%/g)){
     const n=m[1].replace(',','.');
-    if(![...evidence.matchAll(/(\d+(?:[.,]\d+)?)\s*(?:%|percent\b)/gi)].some(x=>x[1].replace(',','.')===n))throw new EditorialSkip('unsupported_percentage');
+    if(![...evidence.matchAll(/(\d+(?:[.,]\d+)?)\s*(?:%|percent\b|процент(?:а|ов)?(?![\p{L}]))/giu)].some(x=>x[1].replace(',','.')===n))throw new EditorialSkip('unsupported_percentage');
   }
+  const fps=/(\d+(?:[.,]\d+)?)\s*(?:fps|frames per second|кадр(?:ов|а)?\s*(?:\/\s*с|в секунду))(?![\p{L}])/giu;
+  const memory=/(\d+(?:[.,]\d+)?)\s*(?:gb|gigabytes?|гб|гигабайт(?:а|ов)?)(?![\p{L}])/giu;
+  const units=[[fps,fps,'unsupported_fps'],[memory,memory,'unsupported_memory']];
+  for(const [out,src,reason] of units){const values=new Set([...evidence.matchAll(src)].map(m=>m[1].replace(',','.')));for(const m of produced.matchAll(out))if(!values.has(m[1].replace(',','.')))throw new EditorialSkip(reason);}
   const platforms=[[/\bPS5\b|PlayStation 5/gi,/\bPS5\b|PlayStation 5/i],[/\bPS4\b|PlayStation 4/gi,/\bPS4\b|PlayStation 4/i],[/\bXbox Series\b/gi,/\bXbox Series\b/i],[/\bNintendo Switch\b/gi,/\bNintendo Switch\b/i]];
   for(const [out,src] of platforms)if(produced.match(out)&&!src.test(evidence))throw new EditorialSkip('unsupported_platform');
   for(const num of numbers(produced))if(!inputNums.has(num))throw new EditorialSkip('generated_unsupported_number');
@@ -86,7 +91,7 @@ export function verifyDraft(draft,article,editorial={}){
     if(!evidence.toLowerCase().includes(m[1].toLowerCase()))throw new EditorialSkip('company_not_in_source');
   }
   if(/\b(?:rumor|rumour) (?:is |was )?(?:false|debunked)|\b(?:denied|debunked|refuted) (?:the |a )?(?:rumor|rumour|report|leak)\b/i.test(evidence)&&!/(?:опроверг|отрица|не подтверд|ложн|неверн)/i.test(produced))throw new EditorialSkip('denial_missing');
-  if(editorial.rumor&&!/по (?:сообщени|данным)|предположительно|слух|неподтвержд|возможно/i.test(produced))
+  if(editorial.rumor&&!/по (?:сообщени|данным)|предположительно|слух|неподтвержд|возможно|опроверг|отрица/i.test(produced))
     throw new EditorialSkip('rumor_presented_as_fact');
   return draft;
 }
@@ -122,7 +127,7 @@ export async function writeWithModel(article,env,model,editorial={},translationR
   const messages=[
     {role:'system',content:SYSTEM+(translationRetry?' Предыдущий редактор не прошёл проверку русского текста. Напиши новый достоверный перевод на русском, не повторяя английский исходник.':'')+(article.gameDetailsRequired?' Для релиза или анонса: три законченных предложения, первое о событии, следующие два о жанре, механике или особенностях игры. Не повторяй одну мысль. Если фактов мало, откажись от публикации. Используй также предоставленный articleContext.':'')},
     {role:'user',content:JSON.stringify({source:article.source,category:editorial.category||'Главные игровые новости',
-      rumor:Boolean(editorial.rumor),accessType:editorial.accessType||null,title:article.title,excerpt:article.description||'',articleContext:article.articleContext||'',gameDetailsRequired:Boolean(article.gameDetailsRequired)})}
+      rumor:Boolean(editorial.rumor),accessType:editorial.accessType||null,title:article.title,excerpt:article.description||'',articleContext:article.articleContext||article.feedContext||'',gameDetailsRequired:Boolean(article.gameDetailsRequired)})}
   ];
   // Keep the known-working GPT-OSS request unchanged. Gemma uses its current completion budget.
   const options=model.includes('gemma-4')?{messages,temperature:0.15,max_completion_tokens:2048,chat_template_kwargs:{enable_thinking:false}}:{messages,temperature:0.15,max_tokens:650};
