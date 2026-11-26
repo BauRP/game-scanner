@@ -2,7 +2,7 @@ import {requireRussianDraft} from './translator.js';
 import {findArticleImage} from './images.js';
 import {coverPngBytes} from './cover.js';
 import {sourceByName} from './sources.js';
-const htmlEscape=value=>String(value).replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));
+const htmlEscape=value=>String(value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#39;');
 export function composePost(draft,article){
   const headline=String(draft.headline||'').replace(/[\r\n]/g,' ').trim().slice(0,85);
   const body=String(draft.body||'').replace(/[\r\n]/g,' ').trim().slice(0,420);
