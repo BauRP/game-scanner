@@ -51,6 +51,7 @@ function srcset(value){
 export function extractInlineImages(html,article){
   const list=[];
   for(const [tag] of String(html).matchAll(/<img\b[^>]*>/gi)){
+    if(list.length>=30)break;
     const a=attrs(tag);
     if((a.width&&Number(a.width)<120)||(a.height&&Number(a.height)<80))continue;
     if(/(?:^|\s)(?:avatar|logo|advertisement|related-post|author-photo)(?:\s|$)/i.test(a.class||''))continue;

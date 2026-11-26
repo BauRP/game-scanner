@@ -11,18 +11,19 @@ export async function* photoCandidates(articles,{fetchFn=fetch,findImage=findArt
  // Soft diversity preference only; no eligible category is blocked.
  const recent=recentCategories.slice(0,3);
  if(recent.length>=2&&recent[0]===recent[1]){
-   const leading=ranked.slice(0,8);
-   leading.sort((a,b)=>{const penalty=x=>!assess(x).eligible?2:Number(assess(x).category===recent[0]&&assess(x).accessType!=='giveaway');return penalty(a)-penalty(b);});
+   const penalty=x=>{const e=assess(x);return !e.eligible?2:Number(e.category===recent[0]&&e.accessType!=='giveaway');};
+   const leading=ranked.slice(0,8).map(a=>({a,p:penalty(a)})).sort((a,b)=>a.p-b.p).map(x=>x.a);
    ranked.splice(0,leading.length,...leading);
  }
- let requests=0,lookups=0,probes=0;const fallbacks=[];
+ let requests=0,lookups=0,probes=0;const fallbacks=[],seenUrls=new Set();
  const boundedFetch=(...args)=>{
    if(requests>=maxRequests)throw Error('Photo search budget reached');
    requests++;return fetchFn(...args);
  };
  for(const article of ranked){
    const editorial=assess(article);
-   if(!editorial.eligible)continue;
+   if(!editorial.eligible||seenUrls.has(article.url))continue;
+   seenUrls.add(article.url);
    if(lookups++>=maxLookups)break;
    if(await wasAttempted(article.url))continue;
    if(!useImages){yield {article,editorial,image:null};continue;}
