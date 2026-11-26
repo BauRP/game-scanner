@@ -34,7 +34,17 @@ export async function* photoCandidates(articles,{fetchFn=fetch,findImage=findArt
    try{image=await findImage(article,probeFetch);}catch{/* An unavailable image is not a failed publication. */}
    const check={source:article.source,...(!limited||image?{found:Boolean(image)}:{})};
    checks.push(check);
-   if(image)yield {article,editorial,image,check};
+   if(image){
+     // Reuse the same search budget after an explicit Telegram image rejection.
+     // Never search again after ambiguous delivery.
+     let alternativeTried=false;
+     const findAlternative=async()=>{
+       if(alternativeTried||requests>=maxRequests)return null;
+       alternativeTried=true;
+       try{return await findImage(article,probeFetch,[image.url]);}catch{return null;}
+     };
+     yield {article,editorial,image,check,findAlternative};
+   }
    else if(fallbacks.length<2)fallbacks.push({article,editorial,image:null});
  }
  for(const fallback of fallbacks)yield fallback;
