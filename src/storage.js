@@ -79,7 +79,8 @@ export async function releaseHour(db,now){
  await db.prepare("DELETE FROM publication_hours WHERE hour_key=?").bind(hourKey(now)).run();
 }
 const EVENT_WORDS=/\b(?:cancel(?:led|ed|s)?|delay(?:ed|s)?|postpon(?:ed|es)|den(?:ied|ies)|refut(?:ed|es)|debunk(?:ed|s)?|refund(?:ed|s)?|shutdown|closed|reopen(?:ed|s)?|restor(?:ed|es))\b/g;
-const eventKey=s=>[...new Set(s.match(EVENT_WORDS)||[])].sort().join(',')+(/\b(?:not|no longer|never|won t|will not|isn t|doesn t)\b/.test(s)?':negative':'');
+const eventGroup=w=>/^cancel/.test(w)?'cancel':/^(delay|postpon)/.test(w)?'delay':/^(den|refut|debunk)/.test(w)?'denial':/^(reopen|restor)/.test(w)?'recovery':/^refund/.test(w)?'refund':w;
+const eventKey=s=>[...new Set((s.match(EVENT_WORDS)||[]).map(eventGroup))].sort().join(',')+(/\b(?:not|no longer|never|won t|will not|isn t|doesn t)\b/.test(s)?':negative':'');
 const STOP=new Set(['the','and','for','with','from','this','that','its','new','game','games','on','in','of','to','a','an','is','at','by']);
 export function prepareTitleIndex(previous){
  const words=x=>new Set(x.split(' ').filter(w=>w.length>2&&!STOP.has(w)));
