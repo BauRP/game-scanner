@@ -194,8 +194,8 @@ async function download(url,article,fetchFn,deadline){
     const mime=fileType(bytes);return mime?{url:hit.url,bytes,mime}:null;
   }catch{return null;}
 }
-export async function findArticleImage(article,fetchFn=fetch){
-  const deadline=Date.now()+16000,seen=new Set();
+export async function findArticleImage(article,fetchFn=fetch,excluded=[]){
+  const deadline=Date.now()+16000,seen=new Set(excluded);
   let attempts=0;
   async function tryList(values,method,limit){
     for(const value of values){

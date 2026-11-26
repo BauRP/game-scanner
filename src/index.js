@@ -45,15 +45,12 @@ export async function runCycle(env,deps={}){
   const {articles,errors=[],feedStats=[]}=news;
   const checks=[],quality=await readQuality(env.DB);
   let draftsTried=0,rejected=0;
-  const checkedArticles=new Set();
-  try{
+    try{
   for await(const selection of photoCandidates(articles.filter(a=>!previousTitles.has(titleKey(a.title))&&!isSimilarTitle(a.title,titleIndex)),{fetchFn:editorialFetch,findImage:deps.findArticleImage,wasAttempted:url=>alreadyAttempted(env.DB,url),useImages:env.USE_SOURCE_IMAGES==='true',quality,checks,recentCategories:recent})){
     const {article:item,editorial}=selection;
     if(draftsTried>=2)break;
     // Never start delivery in a different hour from the reservation.
     if((!deps.now||deps.clock)&&Math.floor(clock()/3600000)!==Math.floor(now/3600000))return {status:'hour_expired',day};
-    if(checkedArticles.has(item.url))continue;
-    checkedArticles.add(item.url);
     if(!await claim(env.DB,item,day,now))continue;
     draftsTried++;
     let draft;
@@ -85,14 +82,14 @@ export async function runCycle(env,deps={}){
       // Never auto retry ambiguous Telegram delivery, which can cause duplicates.
       await markFailed(env.DB,item.url);
       console.error('Posting failed:',String(e?.message||e).slice(0,140));
-      return {status:'post_failed',day};
+      return {status:'post_failed',externalRequests,day};
     }
   }
   if(errors.length)console.warn('Feeds unavailable:',errors.join(' | '));
   // No Telegram call was made. Partial feed failure can justify a bounded second attempt.
   if(errors.length){await releaseHour(env.DB,now);return {status:'feed_unavailable',failedFeeds:errors.length,rejected,externalRequests,day};}
   // An empty successful feed scan made no delivery attempt. Permit the existing :12 retry.
-  if(!articles.length)await releaseHour(env.DB,now);
+  if(!articles.length||(!rejected&&draftsTried===0))await releaseHour(env.DB,now);
   return {status:rejected?'editorial_rejected':articles.length?'no_new_articles':'no_fresh_articles',failedFeeds:0,rejected,externalRequests,day};
   }finally{await saveQuality(env.DB,feedStats,checks);}
 }
@@ -137,7 +134,7 @@ export default {
     // Do not replay delayed triggers from an already elapsed hour.
     if(Number.isFinite(event?.scheduledTime)&&Math.floor(event.scheduledTime/3600000)!==Math.floor(now/3600000))return;
     const work=(async()=>{
-      if(retry){const history=await cycleHistory(env.DB);if(!history.available||!history.lastCycle||history.lastCycle.hourKey!==new Date(now).toISOString().slice(0,13)||!['ai_unavailable','feed_unavailable','no_fresh_articles'].includes(history.lastCycle.status))return {status:'retry_not_needed'};}
+      if(retry){const history=await cycleHistory(env.DB);if(!history.available||!history.lastCycle||history.lastCycle.hourKey!==new Date(now).toISOString().slice(0,13)||!['ai_unavailable','feed_unavailable','no_fresh_articles','no_new_articles'].includes(history.lastCycle.status))return {status:'retry_not_needed'};}
       if(env.PUBLISH_ENABLED!=='true'&&env.COMMISSION_ONCE==='true')return commissionOnce(env);
       const result=await runCycle(env,{now,clock:Date.now});
       // The owner's launch request is armed, but real news remain gated on the two-model test.
