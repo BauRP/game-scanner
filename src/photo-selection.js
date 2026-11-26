@@ -15,14 +15,15 @@ export async function* photoCandidates(articles,{fetchFn=fetch,findImage=findArt
    leading.sort((a,b)=>{const penalty=x=>!assess(x).eligible?2:Number(assess(x).category===recent[0]&&assess(x).accessType!=='giveaway');return penalty(a)-penalty(b);});
    ranked.splice(0,leading.length,...leading);
  }
- let requests=0,lookups=0,probes=0;const fallbacks=[];
+ let requests=0,lookups=0,probes=0;const fallbacks=[],seenUrls=new Set();
  const boundedFetch=(...args)=>{
    if(requests>=maxRequests)throw Error('Photo search budget reached');
    requests++;return fetchFn(...args);
  };
  for(const article of ranked){
    const editorial=assess(article);
-   if(!editorial.eligible)continue;
+   if(!editorial.eligible||seenUrls.has(article.url))continue;
+   seenUrls.add(article.url);
    if(lookups++>=maxLookups)break;
    if(await wasAttempted(article.url))continue;
    if(!useImages){yield {article,editorial,image:null};continue;}
