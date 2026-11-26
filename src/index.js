@@ -91,6 +91,8 @@ export async function runCycle(env,deps={}){
   if(errors.length)console.warn('Feeds unavailable:',errors.join(' | '));
   // No Telegram call was made. Partial feed failure can justify a bounded second attempt.
   if(errors.length){await releaseHour(env.DB,now);return {status:'feed_unavailable',failedFeeds:errors.length,rejected,externalRequests,day};}
+  // An empty successful feed scan made no delivery attempt. Permit the existing :12 retry.
+  if(!articles.length)await releaseHour(env.DB,now);
   return {status:rejected?'editorial_rejected':articles.length?'no_new_articles':'no_fresh_articles',failedFeeds:0,rejected,externalRequests,day};
   }finally{await saveQuality(env.DB,feedStats,checks);}
 }
