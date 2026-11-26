@@ -65,6 +65,17 @@ export async function publishPost(draft,article,env,fetchFn=fetch,selection=unde
         // Unknown network/5xx failures are NEVER retried to avoid duplicate posts.
         if(!(e instanceof TelegramApiError&&e.status===400&&/photo|image|file|media/i.test(e.description||'')))throw e;
         if(selection?.check)selection.check.accepted=false;
+        // One additional original image may be tried only after a definitive rejection.
+        const alternative=await selection?.findAlternative?.();
+        if(alternative&&alternative.url!==image.url){
+          try{
+            const id=await sendPublisherPhoto(draft,article,alternative,env,fetchFn);
+            if(selection?.check)selection.check.accepted=true;
+            return id;
+          }catch(second){
+            if(!(second instanceof TelegramApiError&&second.status===400&&/photo|image|file|media/i.test(second.description||'')))throw second;
+          }
+        }
         console.warn('Source image rejected; using original Game Scanner cover');
       }
     }
