@@ -36,19 +36,20 @@ test('publisher media URL must be trusted',()=>{
 test('original Game Scanner cover is PNG',()=>{
  assert.deepEqual([...coverPngBytes().slice(0,8)],[137,80,78,71,13,10,26,10]);
 });
-test('Telegram caption includes a clickable public source link and fits media limit',()=>{
+test('Telegram caption keeps source attribution private and fits media limit',()=>{
  const s=composePost(JSON.parse(good.response),item);
- assert.ok(s.includes(item.url));assert.ok(s.includes('Источник: <a href='));assert.ok(s.length<=1024);
+ assert.equal(s,'🎮 Новый трейлер Doom\n\nДля Doom представили новый трейлер с игровым процессом.');
+ assert.ok(!s.includes(item.url));assert.ok(!s.includes('Источник:'));assert.ok(!s.includes('Gematsu'));assert.ok(s.length<=1024);
 });
 test('publisher image is attached using sendPhoto',async()=>{
  const calls=[];const f=async(url,opt)=>{if(url===item.image)return photo();calls.push({url,opt});return Response.json({ok:true,result:{message_id:7}});};
  assert.equal(await publishPost(JSON.parse(good.response),item,{TELEGRAM_BOT_TOKEN:'fake',TELEGRAM_CHAT_ID:'@gamescannews',USE_SOURCE_IMAGES:'true'},f),7);
- assert.equal(calls.length,1);assert.equal(calls[0].opt.body.get('photo').name,'news.png');
+ assert.equal(calls.length,1);assert.equal(calls[0].opt.body.get('photo').name,'news.png');assert.equal(calls[0].opt.body.get('caption'),'🎮 Новый трейлер Doom\n\nДля Doom представили новый трейлер с игровым процессом.');assert.equal(calls[0].opt.body.has('parse_mode'),false);
 });
 test('when publisher image is missing, branded photo is uploaded',async()=>{
  const calls=[];const f=async(url,opt)=>{calls.push({url,opt});return Response.json({ok:true,result:{message_id:8}});};
  assert.equal(await publishPost(JSON.parse(good.response),item,{TELEGRAM_BOT_TOKEN:'fake',TELEGRAM_CHAT_ID:'@gamescannews',USE_SOURCE_IMAGES:'false'},f),8);
- assert.equal(calls.length,1);assert.equal(calls[0].opt.body.get('photo').type,'image/png');
+ assert.equal(calls.length,1);assert.equal(calls[0].opt.body.get('photo').type,'image/png');assert.equal(calls[0].opt.body.get('caption'),'🎮 Новый трейлер Doom\n\nДля Doom представили новый трейлер с игровым процессом.');assert.equal(calls[0].opt.body.has('parse_mode'),false);
 });
 test('HTTP 400 photo rejection falls back only once',async()=>{
  let count=0;const f=async(url)=>url===item.image?photo():++count===1?Response.json({ok:false,description:'bad photo'},{status:400}):Response.json({ok:true,result:{message_id:9}});

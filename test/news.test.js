@@ -29,12 +29,13 @@ test('validates JSON from AI',()=>{
   assert.equal(parseDraft({response:'{"headline":"Новость","body":"Короткий текст новости."}'}).headline,'Новость');
   assert.throws(()=>parseDraft({response:'bad output'}));
 });
-test('Telegram post includes a clickable verified source while rejecting untrusted links',()=>{
+test('Telegram post hides publisher attribution while still validating original source',()=>{
   const article=parseFeed(xml,source)[0];
   const txt=composePost({headline:'Новая игра',body:cleanText('<script>bad()</script>Стала известна дата релиза.')},article);
-  assert.match(txt,/🎮 <b>Новая игра<\/b>/);
-  assert.match(txt,/🔗 Источник: <a href="https:\/\/www\.gematsu\.com\/2026\/11\/new-game">Gematsu<\/a>/);
-  assert.ok(!txt.includes('bad()'));
+  assert.equal(txt,'🎮 Новая игра\n\nСтала известна дата релиза.');
+  assert.ok(!txt.includes(article.url));
+  assert.ok(!txt.includes('Источник:'));
+  assert.ok(!txt.includes('Gematsu'));
   assert.throws(()=>composePost({headline:'Новая игра',body:'Стала известна дата релиза.'},{...article,url:'https://evil.test/'}),/verifiable source/);
   assert.ok(!txt.includes('bad()'));
 });
